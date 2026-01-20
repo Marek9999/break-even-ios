@@ -1,0 +1,83 @@
+# Xcode
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcuserstate
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+Packages/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Code Injection
+iOSInjectionProject/
+
+# Secrets and API Keys
+# IMPORTANT: Never commit API keys to version control
+# Configuration.swift contains placeholder values - replace with your own keys locally
+# **/Configuration.swift  # Uncomment this line if you add real keys
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Clerk Configuration (contains publishable key)
+**/ClerkConfiguration.xcconfig
+
+# Node.js / npm (for Convex)
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Convex
+convex/_generated/
+.env.local
+
+# Convex Configuration (contains deployment URL)
+**/ConvexConfiguration.xcconfig

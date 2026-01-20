@@ -1,0 +1,63 @@
+//
+//  break_even_iosApp.swift
+//  break-even-ios
+//
+//  Created by Rudra Das on 2025-01-18.
+//
+
+import SwiftUI
+import Clerk
+
+@main
+struct break_even_iosApp: App {
+    /// Shared Clerk instance for authentication
+    @State private var clerk = Clerk.shared
+    
+    /// Convex service for backend operations
+    @State private var convexService = ConvexService.shared
+    
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environment(\.clerk, clerk)
+                .environment(\.convexService, convexService)
+                .task {
+                    // Configure Clerk
+                    print("🔧 Configuring Clerk...")
+                    clerk.configure(publishableKey: Configuration.clerkPublishableKey)
+                    print("🔧 Convex URL: \(Configuration.convexDeploymentURL)")
+                    try? await clerk.load()
+                    print("🔧 Clerk loaded, session: \(clerk.session != nil ? "exists" : "nil")")
+                    
+                    // If already logged in, sync user
+                    if clerk.session != nil {
+                        print("🔧 Session exists on launch, syncing user...")
+                        do {
+                            try await convexService.syncUser(clerk: clerk)
+                            print("✅ User synced with Convex successfully (on launch)")
+                        } catch {
+                            print("❌ Failed to sync user on launch: \(error)")
+                        }
+                    }
+                }
+                .onChange(of: clerk.session) { oldSession, newSession in
+                    // Sync with Convex when auth state changes
+                    print("🔄 Session changed: \(oldSession != nil) -> \(newSession != nil)")
+                    Task {
+                        if newSession != nil {
+                            do {
+                                print("🔄 Syncing user with Convex...")
+                                try await convexService.syncUser(clerk: clerk)
+                                print("✅ User synced with Convex successfully")
+                            } catch {
+                                print("❌ Failed to sync user with Convex: \(error)")
+                            }
+                        } else {
+                            print("🔄 Signing out...")
+                            await convexService.signOut()
+                        }
+                    }
+                }
+        }
+    }
+}

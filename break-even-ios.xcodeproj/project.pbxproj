@@ -1,0 +1,650 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		818C4C042F1D437400647D3D /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 818C4C032F1D437400647D3D /* Clerk */; };
+		818C4C122F1D796200647D3D /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 818C4C112F1D796200647D3D /* ConvexMobile */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		81238E122F0079D700D19591 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81238DFC2F0079D600D19591 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81238E032F0079D600D19591;
+			remoteInfo = "break-even-ios";
+		};
+		81238E1C2F0079D700D19591 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81238DFC2F0079D600D19591 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81238E032F0079D600D19591;
+			remoteInfo = "break-even-ios";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		81238E042F0079D600D19591 /* break-even-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "break-even-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		81238E112F0079D700D19591 /* break-even-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "break-even-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		81238E1B2F0079D700D19591 /* break-even-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "break-even-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		81238E062F0079D600D19591 /* break-even-ios */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "break-even-ios";
+			sourceTree = "<group>";
+		};
+		81238E142F0079D700D19591 /* break-even-iosTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "break-even-iosTests";
+			sourceTree = "<group>";
+		};
+		81238E1E2F0079D700D19591 /* break-even-iosUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "break-even-iosUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		81238E012F0079D600D19591 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				818C4C042F1D437400647D3D /* Clerk in Frameworks */,
+				818C4C122F1D796200647D3D /* ConvexMobile in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E0E2F0079D700D19591 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E182F0079D700D19591 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		81238DFB2F0079D600D19591 = {
+			isa = PBXGroup;
+			children = (
+				81238E062F0079D600D19591 /* break-even-ios */,
+				81238E142F0079D700D19591 /* break-even-iosTests */,
+				81238E1E2F0079D700D19591 /* break-even-iosUITests */,
+				814215B22F01EB160097A74A /* Frameworks */,
+				81238E052F0079D600D19591 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		81238E052F0079D600D19591 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				81238E042F0079D600D19591 /* break-even-ios.app */,
+				81238E112F0079D700D19591 /* break-even-iosTests.xctest */,
+				81238E1B2F0079D700D19591 /* break-even-iosUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		814215B22F01EB160097A74A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		81238E032F0079D600D19591 /* break-even-ios */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81238E252F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-ios" */;
+			buildPhases = (
+				81238E002F0079D600D19591 /* Sources */,
+				81238E012F0079D600D19591 /* Frameworks */,
+				81238E022F0079D600D19591 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				81238E062F0079D600D19591 /* break-even-ios */,
+			);
+			name = "break-even-ios";
+			packageProductDependencies = (
+				818C4C032F1D437400647D3D /* Clerk */,
+				818C4C112F1D796200647D3D /* ConvexMobile */,
+			);
+			productName = "break-even-ios";
+			productReference = 81238E042F0079D600D19591 /* break-even-ios.app */;
+			productType = "com.apple.product-type.application";
+		};
+		81238E102F0079D700D19591 /* break-even-iosTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81238E282F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-iosTests" */;
+			buildPhases = (
+				81238E0D2F0079D700D19591 /* Sources */,
+				81238E0E2F0079D700D19591 /* Frameworks */,
+				81238E0F2F0079D700D19591 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81238E132F0079D700D19591 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				81238E142F0079D700D19591 /* break-even-iosTests */,
+			);
+			name = "break-even-iosTests";
+			packageProductDependencies = (
+			);
+			productName = "break-even-iosTests";
+			productReference = 81238E112F0079D700D19591 /* break-even-iosTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		81238E1A2F0079D700D19591 /* break-even-iosUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81238E2B2F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-iosUITests" */;
+			buildPhases = (
+				81238E172F0079D700D19591 /* Sources */,
+				81238E182F0079D700D19591 /* Frameworks */,
+				81238E192F0079D700D19591 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81238E1D2F0079D700D19591 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				81238E1E2F0079D700D19591 /* break-even-iosUITests */,
+			);
+			name = "break-even-iosUITests";
+			packageProductDependencies = (
+			);
+			productName = "break-even-iosUITests";
+			productReference = 81238E1B2F0079D700D19591 /* break-even-iosUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		81238DFC2F0079D600D19591 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					81238E032F0079D600D19591 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					81238E102F0079D700D19591 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 81238E032F0079D600D19591;
+					};
+					81238E1A2F0079D700D19591 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 81238E032F0079D600D19591;
+					};
+				};
+			};
+			buildConfigurationList = 81238DFF2F0079D600D19591 /* Build configuration list for PBXProject "break-even-ios" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 81238DFB2F0079D600D19591;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				818C4C022F1D437400647D3D /* XCRemoteSwiftPackageReference "clerk-ios" */,
+				818C4C0E2F1D707F00647D3D /* XCRemoteSwiftPackageReference "convex-swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 81238E052F0079D600D19591 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				81238E032F0079D600D19591 /* break-even-ios */,
+				81238E102F0079D700D19591 /* break-even-iosTests */,
+				81238E1A2F0079D700D19591 /* break-even-iosUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		81238E022F0079D600D19591 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E0F2F0079D700D19591 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E192F0079D700D19591 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		81238E002F0079D600D19591 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E0D2F0079D700D19591 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81238E172F0079D700D19591 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		81238E132F0079D700D19591 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81238E032F0079D600D19591 /* break-even-ios */;
+			targetProxy = 81238E122F0079D700D19591 /* PBXContainerItemProxy */;
+		};
+		81238E1D2F0079D700D19591 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81238E032F0079D600D19591 /* break-even-ios */;
+			targetProxy = 81238E1C2F0079D700D19591 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		81238E232F0079D700D19591 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		81238E242F0079D700D19591 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		81238E262F0079D700D19591 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "break-even-ios/break-even-ios.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6RMC48P7BD;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-ios";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		81238E272F0079D700D19591 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "break-even-ios/break-even-ios.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6RMC48P7BD;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-ios";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		81238E292F0079D700D19591 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-iosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/break-even-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/break-even-ios";
+			};
+			name = Debug;
+		};
+		81238E2A2F0079D700D19591 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-iosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/break-even-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/break-even-ios";
+			};
+			name = Release;
+		};
+		81238E2C2F0079D700D19591 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-iosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "break-even-ios";
+			};
+			name = Debug;
+		};
+		81238E2D2F0079D700D19591 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 81238E062F0079D600D19591 /* break-even-ios */;
+			baseConfigurationReferenceRelativePath = ClerkConfiguration.xcconfig;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.break-even-iosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "break-even-ios";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		81238DFF2F0079D600D19591 /* Build configuration list for PBXProject "break-even-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81238E232F0079D700D19591 /* Debug */,
+				81238E242F0079D700D19591 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81238E252F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81238E262F0079D700D19591 /* Debug */,
+				81238E272F0079D700D19591 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81238E282F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-iosTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81238E292F0079D700D19591 /* Debug */,
+				81238E2A2F0079D700D19591 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81238E2B2F0079D700D19591 /* Build configuration list for PBXNativeTarget "break-even-iosUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81238E2C2F0079D700D19591 /* Debug */,
+				81238E2D2F0079D700D19591 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		818C4C022F1D437400647D3D /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/clerk/clerk-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.71.4;
+			};
+		};
+		818C4C0E2F1D707F00647D3D /* XCRemoteSwiftPackageReference "convex-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/get-convex/convex-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		818C4C032F1D437400647D3D /* Clerk */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 818C4C022F1D437400647D3D /* XCRemoteSwiftPackageReference "clerk-ios" */;
+			productName = Clerk;
+		};
+		818C4C112F1D796200647D3D /* ConvexMobile */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 818C4C0E2F1D707F00647D3D /* XCRemoteSwiftPackageReference "convex-swift" */;
+			productName = ConvexMobile;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 81238DFC2F0079D600D19591 /* Project object */;
+}

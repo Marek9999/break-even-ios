@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Break Even needs camera access to scan receipts for expense splitting.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Break Even needs photo library access to select receipt images for expense splitting.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Break Even needs permission to save receipt images to your photo library.</string>
+	<key>ClerkPublishableKey</key>
+	<string>$(CLERK_PUBLISHABLE_KEY)</string>
+	<key>ConvexHost</key>
+	<string>$(CONVEX_HOST)</string>
+</dict>
+</plist>
+

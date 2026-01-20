@@ -1,0 +1,16 @@
+{
+  "name": "break-even-ios",
+  "version": "1.0.0",
+  "description": "Convex backend for Break Even iOS app",
+  "private": true,
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
