@@ -183,17 +183,36 @@ struct ProfileView: View {
                         }
                     }
                     .disabled(viewModel.isSeedingData || viewModel.currentUser == nil)
+                    
+                    // Clear all user data button
+                    Button(role: .destructive) {
+                        viewModel.showClearConfirmation = true
+                    } label: {
+                        if viewModel.isClearingData {
+                            HStack {
+                                ProgressView()
+                                    .padding(.trailing, 8)
+                                Text("Clearing data...")
+                            }
+                        } else {
+                            Label("Nuke All Data", systemImage: "trash.fill")
+                        }
+                    }
+                    .disabled(viewModel.isClearingData || viewModel.currentUser == nil)
                 } header: {
                     Text("Developer")
                 } footer: {
-                    if let message = viewModel.syncMessage ?? viewModel.seedMessage {
+                    if let message = viewModel.clearMessage {
+                        Text(message)
+                            .foregroundStyle(viewModel.clearError ? .red : .green)
+                    } else if let message = viewModel.syncMessage ?? viewModel.seedMessage {
                         Text(message)
                             .foregroundStyle((viewModel.syncError || viewModel.seedError) ? .red : .green)
                     } else if viewModel.currentUser == nil {
                         Text("User not synced to Convex. Tap 'Sync User' first.")
                             .foregroundStyle(.orange)
                     } else {
-                        Text("User synced. You can now seed sample data.")
+                        Text("User synced. You can seed sample data or nuke all data to start fresh.")
                     }
                 }
                 #endif
@@ -220,6 +239,16 @@ struct ProfileView: View {
             .onDisappear {
                 viewModel.unsubscribe()
             }
+            #if DEBUG
+            .alert("Nuke All Data?", isPresented: $viewModel.showClearConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Nuke It", role: .destructive) {
+                    clearAllUserData()
+                }
+            } message: {
+                Text("This will delete ALL your friends, transactions, and splits. You can re-seed sample data afterwards. This cannot be undone.")
+            }
+            #endif
         }
     }
     
@@ -298,6 +327,51 @@ struct ProfileView: View {
                 viewModel.seedError = true
             }
             viewModel.isSeedingData = false
+        }
+    }
+    
+    private func clearAllUserData() {
+        guard let clerkId = clerk.user?.id else {
+            viewModel.clearMessage = "Error: Not logged in"
+            viewModel.clearError = true
+            return
+        }
+        
+        viewModel.isClearingData = true
+        viewModel.clearMessage = nil
+        viewModel.clearError = false
+        // Clear other messages
+        viewModel.seedMessage = nil
+        viewModel.syncMessage = nil
+        
+        Task {
+            do {
+                // Define response type for the mutation result
+                struct ClearResult: Codable {
+                    let message: String
+                    let deleted: DeletedCounts
+                    
+                    struct DeletedCounts: Codable {
+                        let friends: Int
+                        let transactions: Int
+                        let splits: Int
+                    }
+                }
+                
+                let result: ClearResult = try await convexService.client.mutation(
+                    "seed:clearUserData",
+                    with: ["clerkId": clerkId]
+                )
+                
+                viewModel.clearMessage = "🧹 Nuked: \(result.deleted.friends) friends, \(result.deleted.transactions) transactions, \(result.deleted.splits) splits"
+                viewModel.clearError = false
+                // Refresh subscriptions to reflect cleared data
+                startSubscriptions()
+            } catch {
+                viewModel.clearMessage = "Error: \(error.localizedDescription)"
+                viewModel.clearError = true
+            }
+            viewModel.isClearingData = false
         }
     }
     #endif

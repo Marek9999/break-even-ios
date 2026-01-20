@@ -23,6 +23,12 @@ class ProfileViewModel {
     var seedMessage: String?
     var seedError = false
     
+    // Clear data state (DEBUG only)
+    var isClearingData = false
+    var clearMessage: String?
+    var clearError = false
+    var showClearConfirmation = false
+    
     // Sync state (DEBUG only)
     var isSyncing = false
     var syncMessage: String?

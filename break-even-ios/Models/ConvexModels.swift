@@ -17,10 +17,26 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     let name: String
     let phone: String?
     let avatarUrl: String?
-    let defaultCurrency: String
+    private let _defaultCurrency: String?
     let createdAt: Double
     
     var id: String { _id }
+    
+    /// User's default currency (defaults to USD if not set)
+    var defaultCurrency: String {
+        _defaultCurrency ?? "USD"
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case _id
+        case clerkId
+        case email
+        case name
+        case phone
+        case avatarUrl
+        case _defaultCurrency = "defaultCurrency"
+        case createdAt
+    }
     
     var initials: String {
         let components = name.split(separator: " ")
