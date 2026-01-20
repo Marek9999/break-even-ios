@@ -86,7 +86,10 @@ struct HistoryView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(viewModel.filteredTransactions, id: \._id) { transaction in
                                 NavigationLink {
-                                    TransactionDetailView(transaction: transaction)
+                                    TransactionDetailView(
+                                        transaction: transaction,
+                                        userCurrency: viewModel.userCurrency
+                                    )
                                 } label: {
                                     SplitHistoryRow(transaction: transaction)
                                 }
@@ -116,6 +119,7 @@ struct HistoryView: View {
     private func startSubscriptions() {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToTransactions(clerkId: clerkId)
+        viewModel.subscribeToUser(clerkId: clerkId)
     }
     
     // MARK: - Search Accessory

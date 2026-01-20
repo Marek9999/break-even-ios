@@ -39,6 +39,7 @@ struct OwedTabSelector: View {
     // 2. Data to Display
     let owedToYouAmount: Double
     let youOweAmount: Double
+    let currencyCode: String  // User's default currency
     
     // 3. Internal Animation State
     @State private var selectedIndex: Int = 0
@@ -197,8 +198,8 @@ struct OwedTabSelector: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.text.opacity(0.6))
                     
-                    // Display Real Data
-                    Text(owedToYouAmount, format: .currency(code: "USD"))
+                    // Display Real Data with user's currency
+                    Text(owedToYouAmount, format: .currency(code: currencyCode))
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
@@ -224,8 +225,8 @@ struct OwedTabSelector: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.text.opacity(0.6))
                     
-                    // Display Real Data
-                    Text(youOweAmount, format: .currency(code: "USD"))
+                    // Display Real Data with user's currency
+                    Text(youOweAmount, format: .currency(code: currencyCode))
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
@@ -285,7 +286,8 @@ private struct PreviewWrapper: View {
                 OwedTabSelector(
                     selectedTab: $tab,
                     owedToYouAmount: 1250.00,
-                    youOweAmount: 42.50
+                    youOweAmount: 42.50,
+                    currencyCode: "USD"
                 )
                 
                 // Verify Binding Works

@@ -14,6 +14,7 @@ internal import Combine
 class ProfileViewModel {
     // UI State
     var showAddContact = false
+    var showCurrencyPicker = false
     var error: String?
     var isLoading = false
     

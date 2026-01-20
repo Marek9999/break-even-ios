@@ -10,6 +10,7 @@ import SwiftUI
 struct BubbleClusterView: View {
     let contacts: [(friend: ConvexFriend, amount: Double)]
     let isOwedToUser: Bool
+    let currencyCode: String  // User's default currency
     let onPersonTap: (ConvexFriend) -> Void
     
     @State private var bubblePositions: [String: CGPoint] = [:]
@@ -29,6 +30,7 @@ struct BubbleClusterView: View {
                             amount: contact.amount,
                             size: bubbleSize(for: contact.amount),
                             isOwedToUser: isOwedToUser,
+                            currencyCode: currencyCode,
                             onTap: {
                                 onPersonTap(contact.friend)
                             }
@@ -111,6 +113,7 @@ struct BubbleView: View {
     let amount: Double
     let size: CGFloat
     let isOwedToUser: Bool
+    let currencyCode: String
     let onTap: () -> Void
     
     @State private var isPressed = false
@@ -139,8 +142,8 @@ struct BubbleView: View {
                     .fontWeight(.medium)
                     .lineLimit(1)
                 
-                // Amount
-                Text(amount.asCurrency)
+                // Amount in user's currency
+                Text(amount.asCurrency(code: currencyCode))
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .foregroundStyle(isOwedToUser ? .accent : .appDestructive)
@@ -211,6 +214,7 @@ struct BubbleClusterEmptyView: View {
     BubbleClusterView(
         contacts: [],
         isOwedToUser: true,
+        currencyCode: "USD",
         onPersonTap: { _ in }
     )
 }

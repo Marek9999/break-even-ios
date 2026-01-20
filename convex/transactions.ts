@@ -2,6 +2,23 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
+// Exchange rates validator for the supported currencies
+const exchangeRatesValidator = v.optional(
+  v.object({
+    baseCurrency: v.string(),
+    rates: v.object({
+      USD: v.float64(),
+      EUR: v.float64(),
+      GBP: v.float64(),
+      CAD: v.float64(),
+      AUD: v.float64(),
+      INR: v.float64(),
+      JPY: v.float64(),
+    }),
+    fetchedAt: v.number(),
+  })
+);
+
 /**
  * Create a new transaction with splits
  */
@@ -35,6 +52,8 @@ export const createTransaction = mutation({
         percentage: v.optional(v.float64()),
       })
     ),
+    // Exchange rates snapshot at time of transaction creation
+    exchangeRates: exchangeRatesValidator,
   },
   handler: async (ctx, args) => {
     const user = await ctx.db
@@ -65,6 +84,7 @@ export const createTransaction = mutation({
       status: "pending",
       receiptFileId: args.receiptFileId,
       items: args.items,
+      exchangeRates: args.exchangeRates,
       date: args.date,
       createdAt: Date.now(),
     });
@@ -110,6 +130,7 @@ export const createTransactionFromJson = mutation({
     splitsJson: v.string(), // JSON string of splits array
     itemsJson: v.optional(v.string()), // JSON string of items array
     receiptFileId: v.optional(v.string()), // Storage ID as string
+    exchangeRatesJson: v.optional(v.string()), // JSON string of exchange rates
   },
   handler: async (ctx, args) => {
     const user = await ctx.db
@@ -155,6 +176,25 @@ export const createTransactionFromJson = mutation({
       items = JSON.parse(args.itemsJson);
     }
 
+    // Parse exchange rates JSON if present
+    interface ExchangeRatesData {
+      baseCurrency: string;
+      rates: {
+        USD: number;
+        EUR: number;
+        GBP: number;
+        CAD: number;
+        AUD: number;
+        INR: number;
+        JPY: number;
+      };
+      fetchedAt: number;
+    }
+    let exchangeRates: ExchangeRatesData | undefined;
+    if (args.exchangeRatesJson) {
+      exchangeRates = JSON.parse(args.exchangeRatesJson);
+    }
+
     // Convert items to proper format with Id types
     const convertedItems = items?.map((item) => ({
       id: item.id,
@@ -178,6 +218,7 @@ export const createTransactionFromJson = mutation({
         ? (args.receiptFileId as Id<"_storage">)
         : undefined,
       items: convertedItems,
+      exchangeRates,
       date,
       createdAt: Date.now(),
     });
@@ -524,7 +565,33 @@ export const settleAllWithFriend = mutation({
 });
 
 /**
+ * Helper function to convert amount using stored exchange rates
+ * All rates are relative to USD
+ */
+function convertAmountHelper(
+  amount: number,
+  fromCurrency: string,
+  toCurrency: string,
+  rates: { USD: number; EUR: number; GBP: number; CAD: number; AUD: number; INR: number; JPY: number }
+): number {
+  if (fromCurrency === toCurrency) {
+    return amount;
+  }
+
+  const fromRate = rates[fromCurrency as keyof typeof rates];
+  const toRate = rates[toCurrency as keyof typeof rates];
+
+  if (!fromRate || !toRate) {
+    return amount;
+  }
+
+  const amountInUSD = amount / fromRate;
+  return amountInUSD * toRate;
+}
+
+/**
  * Get balance summary with a specific friend
+ * Balances are converted to user's default currency using stored exchange rates
  */
 export const getBalanceWithFriend = query({
   args: {
@@ -538,8 +605,10 @@ export const getBalanceWithFriend = query({
       .unique();
 
     if (!user) {
-      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0 };
+      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0, userCurrency: "USD", balancesByCurrency: {} };
     }
+
+    const userCurrency = user.defaultCurrency;
 
     // Get self friend
     const selfFriend = await ctx.db
@@ -550,8 +619,11 @@ export const getBalanceWithFriend = query({
       .unique();
 
     if (!selfFriend) {
-      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0 };
+      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0, userCurrency, balancesByCurrency: {} };
     }
+
+    // Track balances by original currency
+    const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
 
     // Get all unsettled splits for this friend (what friend owes)
     const friendSplits = await ctx.db
@@ -561,7 +633,7 @@ export const getBalanceWithFriend = query({
       )
       .collect();
 
-    let friendOwesUser = 0;
+    let friendOwesUserConverted = 0;
     for (const split of friendSplits) {
       const transaction = await ctx.db.get(split.transactionId);
       if (!transaction) continue;
@@ -569,7 +641,25 @@ export const getBalanceWithFriend = query({
       // Only count if user paid
       const payer = await ctx.db.get(transaction.paidById);
       if (payer && payer.isSelf) {
-        friendOwesUser += split.amount;
+        const txCurrency = transaction.currency;
+        
+        // Track by original currency
+        if (!balancesByCurrency[txCurrency]) {
+          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+        }
+        balancesByCurrency[txCurrency].friendOwes += split.amount;
+        
+        // Convert to user's currency
+        if (transaction.exchangeRates) {
+          friendOwesUserConverted += convertAmountHelper(
+            split.amount,
+            txCurrency,
+            userCurrency,
+            transaction.exchangeRates.rates
+          );
+        } else {
+          friendOwesUserConverted += split.amount;
+        }
       }
     }
 
@@ -581,21 +671,41 @@ export const getBalanceWithFriend = query({
       )
       .collect();
 
-    let userOwesFriend = 0;
+    let userOwesFriendConverted = 0;
     for (const split of userSplits) {
       const transaction = await ctx.db.get(split.transactionId);
       if (!transaction) continue;
 
       // Only count if friend paid
       if (transaction.paidById === args.friendId) {
-        userOwesFriend += split.amount;
+        const txCurrency = transaction.currency;
+        
+        // Track by original currency
+        if (!balancesByCurrency[txCurrency]) {
+          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+        }
+        balancesByCurrency[txCurrency].userOwes += split.amount;
+        
+        // Convert to user's currency
+        if (transaction.exchangeRates) {
+          userOwesFriendConverted += convertAmountHelper(
+            split.amount,
+            txCurrency,
+            userCurrency,
+            transaction.exchangeRates.rates
+          );
+        } else {
+          userOwesFriendConverted += split.amount;
+        }
       }
     }
 
     return {
-      friendOwesUser,
-      userOwesFriend,
-      netBalance: friendOwesUser - userOwesFriend,
+      friendOwesUser: friendOwesUserConverted,
+      userOwesFriend: userOwesFriendConverted,
+      netBalance: friendOwesUserConverted - userOwesFriendConverted,
+      userCurrency,
+      balancesByCurrency,
     };
   },
 });

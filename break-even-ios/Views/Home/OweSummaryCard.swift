@@ -12,6 +12,7 @@ struct OweSummaryCard: View {
     let totalAmount: Double
     let friends: [(friend: ConvexFriend, amount: Double)]
     let isOwedToUser: Bool
+    let currencyCode: String  // User's default currency for display
     
     @State private var showPeopleList = false
     
@@ -39,7 +40,7 @@ struct OweSummaryCard: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(accentColor)
                     
-                    Text(totalAmount.asCurrency)
+                    Text(totalAmount.asCurrency(code: currencyCode))
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(Color("Text"))
                 }
@@ -65,7 +66,8 @@ struct OweSummaryCard: View {
             FriendsListSheet(
                 title: title,
                 friends: friends,
-                isOwedToUser: isOwedToUser
+                isOwedToUser: isOwedToUser,
+                currencyCode: currencyCode
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -152,6 +154,7 @@ struct FriendsListSheet: View {
     let title: String
     let friends: [(friend: ConvexFriend, amount: Double)]
     let isOwedToUser: Bool
+    let currencyCode: String
     
     @Environment(\.dismiss) private var dismiss
     
@@ -171,7 +174,8 @@ struct FriendsListSheet: View {
                         friend: item.friend,
                         amount: item.amount,
                         accentColor: accentColor,
-                        secondaryColor: secondaryColor
+                        secondaryColor: secondaryColor,
+                        currencyCode: currencyCode
                     )
                 }
             }
@@ -196,6 +200,7 @@ struct FriendAmountRow: View {
     let amount: Double
     let accentColor: Color
     let secondaryColor: Color
+    let currencyCode: String
     
     var body: some View {
         HStack(spacing: 14) {
@@ -237,7 +242,7 @@ struct FriendAmountRow: View {
             Spacer()
             
             // Amount
-            Text(amount.asCurrency)
+            Text(amount.asCurrency(code: currencyCode))
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(accentColor)
         }
@@ -254,14 +259,16 @@ struct FriendAmountRow: View {
             title: "Owed to you",
             totalAmount: 723.45,
             friends: [],
-            isOwedToUser: true
+            isOwedToUser: true,
+            currencyCode: "USD"
         )
         
         OweSummaryCard(
             title: "You owe others",
             totalAmount: 423.25,
             friends: [],
-            isOwedToUser: false
+            isOwedToUser: false,
+            currencyCode: "EUR"
         )
         
         // Empty state
@@ -269,7 +276,8 @@ struct FriendAmountRow: View {
             title: "Owed to you",
             totalAmount: 0,
             friends: [],
-            isOwedToUser: true
+            isOwedToUser: true,
+            currencyCode: "GBP"
         )
     }
     .padding()

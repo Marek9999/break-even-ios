@@ -54,27 +54,48 @@ extension Date {
 // MARK: - Double Extensions
 
 extension Double {
+    /// Format as currency using default currency (USD)
     var asCurrency: String {
+        asCurrency(code: Configuration.defaultCurrency)
+    }
+    
+    /// Format as currency using a specific currency code
+    func asCurrency(code: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = Configuration.defaultCurrency
-        return formatter.string(from: NSNumber(value: self)) ?? "$\(self)"
+        formatter.currencyCode = code
+        // Handle Japanese Yen which doesn't use decimal places
+        if code == "JPY" {
+            formatter.maximumFractionDigits = 0
+        }
+        return formatter.string(from: NSNumber(value: self)) ?? "\(currencySymbol(for: code))\(self)"
     }
     
     /// Compact currency format for pills (e.g., "$21.5" instead of "$21.50")
     var asCompactCurrency: String {
+        asCompactCurrency(code: Configuration.defaultCurrency)
+    }
+    
+    /// Compact currency format with specific currency code
+    func asCompactCurrency(code: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = Configuration.defaultCurrency
+        formatter.currencyCode = code
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
-        // Remove trailing zeros
-        if self == floor(self) {
+        
+        // Handle Japanese Yen which doesn't use decimal places
+        if code == "JPY" {
             formatter.maximumFractionDigits = 0
-        } else if (self * 10) == floor(self * 10) {
-            formatter.maximumFractionDigits = 1
+        } else {
+            // Remove trailing zeros
+            if self == floor(self) {
+                formatter.maximumFractionDigits = 0
+            } else if (self * 10) == floor(self * 10) {
+                formatter.maximumFractionDigits = 1
+            }
         }
-        return formatter.string(from: NSNumber(value: self)) ?? "$\(self)"
+        return formatter.string(from: NSNumber(value: self)) ?? "\(currencySymbol(for: code))\(self)"
     }
     
     var asPercentage: String {
@@ -83,6 +104,14 @@ extension Double {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 1
         return formatter.string(from: NSNumber(value: self / 100)) ?? "\(self)%"
+    }
+    
+    /// Helper to get currency symbol
+    private func currencySymbol(for code: String) -> String {
+        if let currency = SupportedCurrency.from(code: code) {
+            return currency.symbol
+        }
+        return "$"
     }
 }
 

@@ -39,6 +39,10 @@ struct PersonDetailSheet: View {
         balance.displayAmount
     }
     
+    private var userCurrency: String {
+        balance.userCurrency
+    }
+    
     // Filter transactions for this friend
     private var relevantTransactions: [(transaction: EnrichedTransaction, amount: Double, isOwed: Bool)] {
         transactions.compactMap { transaction in
@@ -79,7 +83,7 @@ struct PersonDetailSheet: View {
                                     .fontWeight(.medium)
                                     .foregroundStyle(.text.opacity(0.6))
                                 
-                                Text(displayAmount.asCurrency)
+                                Text(displayAmount.asCurrency(code: userCurrency))
                                     .font(.title)
                                     .fontWeight(.semibold)
                                     .foregroundStyle(owedToMe ? .accent : .appDestructive)
@@ -113,7 +117,7 @@ struct PersonDetailSheet: View {
                 }
             }
             .alert(
-                "Settle all \(displayAmount.asCurrency) \(owedToMe ? "from" : "to") \(friend.name)?",
+                "Settle all \(displayAmount.asCurrency(code: userCurrency)) \(owedToMe ? "from" : "to") \(friend.name)?",
                 isPresented: $showSettleConfirmation
             ) {
                 Button("Not Yet", role: .cancel) {
@@ -237,7 +241,8 @@ struct PersonDetailSheet: View {
                         Text(item.isOwed ? "They owe" : "You owe")
                             .font(.caption)
                             .foregroundStyle(.text.opacity(0.6))
-                        Text(item.amount.asCurrency)
+                        // Show amount in user's currency (converted on backend)
+                        Text(item.amount.asCurrency(code: userCurrency))
                             .font(.default)
                             .fontWeight(.semibold)
                             .foregroundStyle(item.isOwed ? .accent : .appDestructive)
@@ -430,7 +435,13 @@ struct SlideToConfirmButton: View {
             isSelf: false,
             createdAt: Date().timeIntervalSince1970 * 1000
         ),
-        balance: BalanceSummary(friendOwesUser: 50.0, userOwesFriend: 0, netBalance: 50.0),
+        balance: BalanceSummary(
+            friendOwesUser: 50.0,
+            userOwesFriend: 0,
+            netBalance: 50.0,
+            userCurrency: "USD",
+            balancesByCurrency: nil
+        ),
         onStartSplit: { _ in }
     )
 }

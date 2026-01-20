@@ -64,7 +64,7 @@ struct SplitBreakdownView: View {
                 
                 Spacer()
                 
-                Text(viewModel.remainingToAssign.asCurrency)
+                Text(viewModel.remainingToAssign.asCurrency(code: viewModel.currency))
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundStyle(viewModel.remainingToAssign > 0 ? .orange : .green)
@@ -83,7 +83,7 @@ struct SplitBreakdownView: View {
                     TextField("0.00", value: Binding(
                         get: { viewModel.getCustomAmount(for: friend) },
                         set: { viewModel.setCustomAmount($0, for: friend) }
-                    ), format: .currency(code: "USD"))
+                    ), format: .currency(code: viewModel.currency))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 100)
@@ -184,6 +184,7 @@ struct SplitBreakdownView: View {
                 ItemSplitRow(
                     item: item,
                     participants: viewModel.participants,
+                    currencyCode: viewModel.currency,
                     onToggleAssignment: { friend in
                         viewModel.toggleItemAssignment(item: item, friend: friend)
                     },
@@ -202,7 +203,7 @@ struct SplitBreakdownView: View {
                     
                     Spacer()
                     
-                    Text(viewModel.itemsTotal.asCurrency)
+                    Text(viewModel.itemsTotal.asCurrency(code: viewModel.currency))
                         .font(.subheadline)
                         .fontWeight(.semibold)
                 }
@@ -273,6 +274,7 @@ struct FriendAvatar: View {
 struct ItemSplitRow: View {
     let item: SplitItem
     let participants: [ConvexFriend]
+    let currencyCode: String
     let onToggleAssignment: (ConvexFriend) -> Void
     let onRemove: () -> Void
     
@@ -285,7 +287,7 @@ struct ItemSplitRow: View {
                 
                 Spacer()
                 
-                Text(item.formattedAmount)
+                Text(item.amount.asCurrency(code: currencyCode))
                     .font(.body)
                     .fontWeight(.semibold)
                 

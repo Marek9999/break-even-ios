@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Clerk
+import ConvexMobile
 
 struct ProfileView: View {
     @Environment(\.clerk) private var clerk
@@ -101,12 +102,33 @@ struct ProfileView: View {
                 
                 // App Section
                 Section {
-                    HStack {
-                        Label("Currency", systemImage: "dollarsign.circle")
-                        Spacer()
-                        Text(viewModel.currentUser?.defaultCurrency ?? "USD")
-                            .foregroundStyle(.secondary)
+                    // Currency Picker
+                    Button {
+                        viewModel.showCurrencyPicker = true
+                    } label: {
+                        HStack {
+                            Label("Default Currency", systemImage: "dollarsign.circle")
+                            
+                            Spacer()
+                            
+                            if let currencyCode = viewModel.currentUser?.defaultCurrency,
+                               let currency = SupportedCurrency.from(code: currencyCode) {
+                                HStack(spacing: 6) {
+                                    Text(currency.flag)
+                                    Text(currency.rawValue)
+                                }
+                                .foregroundStyle(.secondary)
+                            } else {
+                                Text("USD")
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .buttonStyle(.plain)
                     
                     HStack {
                         Label("Storage", systemImage: "cloud")
@@ -123,6 +145,8 @@ struct ProfileView: View {
                     }
                 } header: {
                     Text("App")
+                } footer: {
+                    Text("Your default currency is used to display total balances. Individual splits keep their original currency.")
                 }
                 
                 // Developer Section (for testing)
@@ -178,6 +202,18 @@ struct ProfileView: View {
             .sheet(isPresented: $viewModel.showAddContact) {
                 AddPersonSheet()
             }
+            .sheet(isPresented: $viewModel.showCurrencyPicker) {
+                CurrencyPickerSheet(
+                    selectedCurrency: Binding(
+                        get: { viewModel.currentUser?.defaultCurrency ?? "USD" },
+                        set: { newCurrency in
+                            updateUserCurrency(to: newCurrency)
+                        }
+                    )
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
             .onAppear {
                 startSubscriptions()
             }
@@ -193,6 +229,27 @@ struct ProfileView: View {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToFriends(clerkId: clerkId)
         viewModel.subscribeToUser(clerkId: clerkId)
+    }
+    
+    // MARK: - Currency Update
+    
+    private func updateUserCurrency(to newCurrency: String) {
+        guard let clerkId = clerk.user?.id else { return }
+        
+        Task {
+            do {
+                let _: String = try await convexService.client.mutation(
+                    "users:updateProfile",
+                    with: [
+                        "clerkId": clerkId,
+                        "defaultCurrency": newCurrency
+                    ]
+                )
+                // The subscription will automatically update the UI
+            } catch {
+                print("Failed to update currency: \(error)")
+            }
+        }
     }
     
     // MARK: - Developer Functions

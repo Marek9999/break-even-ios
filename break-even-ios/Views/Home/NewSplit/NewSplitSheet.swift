@@ -19,6 +19,9 @@ struct NewSplitSheet: View {
     let allFriends: [ConvexFriend]
     let selfFriend: ConvexFriend?
     
+    // User's default currency
+    let userDefaultCurrency: String
+    
     // Receipt data if scanning
     let receiptResult: ReceiptScanResult?
     
@@ -33,12 +36,14 @@ struct NewSplitSheet: View {
         receiptResult: ReceiptScanResult? = nil,
         preSelectedFriend: ConvexFriend? = nil,
         allFriends: [ConvexFriend] = [],
-        selfFriend: ConvexFriend? = nil
+        selfFriend: ConvexFriend? = nil,
+        userDefaultCurrency: String = "USD"
     ) {
         self.receiptResult = receiptResult
         self.allFriends = allFriends
         self.selfFriend = selfFriend
-        self._viewModel = State(initialValue: NewSplitViewModel(preSelectedFriend: preSelectedFriend))
+        self.userDefaultCurrency = userDefaultCurrency
+        self._viewModel = State(initialValue: NewSplitViewModel(preSelectedFriend: preSelectedFriend, defaultCurrency: userDefaultCurrency))
     }
     
     // Non-self friends for selection
@@ -160,8 +165,10 @@ struct NewSplitSheet: View {
             print("=========================================")
         }
         
-        // Set default currency
-        viewModel.currency = Configuration.defaultCurrency
+        // Set default currency (already set in ViewModel init, but ensure it's consistent)
+        if viewModel.currency.isEmpty {
+            viewModel.currency = userDefaultCurrency
+        }
     }
     
     // MARK: - Save
@@ -209,14 +216,19 @@ struct NewSplitSheet: View {
     
     private var amountSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Total Amount")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Total Amount")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                // Currency selector button
+                CurrencyButton(selectedCurrency: $viewModel.currency)
+            }
             
             HStack {
-                Text(viewModel.currency == "USD" ? "$" : viewModel.currency)
-                    .font(.title)
-                    .foregroundStyle(.secondary)
+                CurrencySymbolView(currencyCode: viewModel.currency)
                 
                 TextField("0.00", value: $viewModel.totalAmount, format: .number.precision(.fractionLength(2)))
                     .font(.title)
@@ -438,6 +450,6 @@ struct PaidByPickerSheet: View {
 // MARK: - Preview
 
 #Preview("Empty State") {
-    NewSplitSheet(allFriends: [], selfFriend: nil)
+    NewSplitSheet(allFriends: [], selfFriend: nil, userDefaultCurrency: "USD")
         .environment(\.convexService, ConvexService.shared)
 }

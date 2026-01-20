@@ -19,6 +19,7 @@ struct SplitDetailView: View {
     @Environment(\.convexService) private var convexService
     
     let transaction: EnrichedTransaction
+    let userCurrency: String  // User's default currency for display
     
     @State private var detailedTransaction: EnrichedTransaction?
     @State private var isLoading = false
@@ -26,6 +27,11 @@ struct SplitDetailView: View {
     
     private var displayTransaction: EnrichedTransaction {
         detailedTransaction ?? transaction
+    }
+    
+    /// Whether the transaction currency differs from user's default
+    private var showCurrencyConversion: Bool {
+        displayTransaction.currency != userCurrency
     }
     
     var body: some View {
@@ -118,9 +124,17 @@ struct SplitDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             
+            // Show amount in original transaction currency
             Text(displayTransaction.formattedAmount)
                 .font(.largeTitle)
                 .fontWeight(.bold)
+            
+            // If transaction currency differs from user's default, show converted amount
+            if showCurrencyConversion {
+                Text("(\(displayTransaction.formattedAmount(in: userCurrency)))")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
             
             HStack {
                 Text("Paid by")
@@ -170,7 +184,13 @@ struct SplitDetailView: View {
             
             VStack(spacing: 8) {
                 ForEach(displayTransaction.splits, id: \.id) { split in
-                    SplitRow(split: split)
+                    SplitRow(
+                        split: split,
+                        currencyCode: displayTransaction.currency,
+                        showConversion: showCurrencyConversion,
+                        userCurrency: userCurrency,
+                        exchangeRates: displayTransaction.exchangeRates
+                    )
                 }
             }
             .padding()
@@ -202,7 +222,8 @@ struct SplitDetailView: View {
                         
                         Spacer()
                         
-                        Text(item.totalPrice.asCurrency)
+                        // Show item price in transaction's currency
+                        Text(item.totalPrice.asCurrency(code: displayTransaction.currency))
                             .font(.body)
                             .fontWeight(.medium)
                     }
@@ -260,6 +281,18 @@ struct SplitDetailView: View {
 
 struct SplitRow: View {
     let split: EnrichedSplit
+    let currencyCode: String
+    let showConversion: Bool
+    let userCurrency: String
+    let exchangeRates: ExchangeRates?
+    
+    /// Converted amount in user's currency
+    private var convertedAmount: Double {
+        guard let rates = exchangeRates else {
+            return split.amount
+        }
+        return rates.convert(amount: split.amount, from: currencyCode, to: userCurrency)
+    }
     
     var body: some View {
         HStack {
@@ -280,10 +313,19 @@ struct SplitRow: View {
             
             Spacer()
             
-            // Amount
-            Text(split.formattedAmount)
-                .font(.body)
-                .fontWeight(.medium)
+            // Amount in original currency
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(split.amount.asCurrency(code: currencyCode))
+                    .font(.body)
+                    .fontWeight(.medium)
+                
+                // Show converted amount if different currency
+                if showConversion {
+                    Text("(\(convertedAmount.asCurrency(code: userCurrency)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             // Settled indicator
             Image(systemName: split.isSettled ? "checkmark.circle.fill" : "circle")
@@ -304,17 +346,23 @@ struct SplitRow: View {
                 emoji: "🍕",
                 description: nil,
                 totalAmount: 156.80,
-                currency: "USD",
+                currency: "EUR",
                 splitMethod: "equal",
                 status: "pending",
                 receiptFileId: nil,
                 items: nil,
+                exchangeRates: ExchangeRates(
+                    baseCurrency: "USD",
+                    rates: CurrencyRates.fallback,
+                    fetchedAt: Date().timeIntervalSince1970 * 1000
+                ),
                 date: Date().timeIntervalSince1970 * 1000,
                 createdAt: Date().timeIntervalSince1970 * 1000,
                 payer: nil,
                 splits: [],
                 receiptUrl: nil
-            )
+            ),
+            userCurrency: "USD"
         )
     }
 }

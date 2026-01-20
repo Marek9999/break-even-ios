@@ -22,10 +22,17 @@ class HomeViewModel {
     var friendsWithBalances: [FriendWithBalance] = []
     var selfFriend: ConvexFriend?
     var allFriends: [ConvexFriend] = []
+    var currentUser: ConvexUser?
+    
+    // User's default currency (derived from currentUser)
+    var userCurrency: String {
+        currentUser?.defaultCurrency ?? "USD"
+    }
     
     // Subscriptions
     private var balancesSubscription: Task<Void, Never>?
     private var friendsSubscription: Task<Void, Never>?
+    private var userSubscription: Task<Void, Never>?
     
     /// Subscribe to friends with balances
     func subscribeToBalances(clerkId: String) {
@@ -36,14 +43,16 @@ class HomeViewModel {
             let subscription = client.subscribe(
                 to: "friends:getFriendsWithBalances",
                 with: ["clerkId": clerkId],
-                yielding: [FriendWithBalance].self
+                yielding: FriendsWithBalancesResponse.self
             )
-            .replaceError(with: [])
+            .replaceError(with: FriendsWithBalancesResponse(balances: [], userCurrency: "USD"))
             .values
             
-            for await balances in subscription {
+            for await response in subscription {
                 if Task.isCancelled { break }
-                self.friendsWithBalances = balances
+                self.friendsWithBalances = response.balances
+                // userCurrency from response can be used if needed, 
+                // but we already have it from currentUser subscription
             }
         }
     }
@@ -70,10 +79,32 @@ class HomeViewModel {
         }
     }
     
+    /// Subscribe to current user (for settings like default currency)
+    func subscribeToUser(clerkId: String) {
+        userSubscription?.cancel()
+        
+        userSubscription = Task {
+            let client = ConvexService.shared.client
+            let subscription = client.subscribe(
+                to: "users:getCurrentUser",
+                with: ["clerkId": clerkId],
+                yielding: ConvexUser?.self
+            )
+            .replaceError(with: nil)
+            .values
+            
+            for await user in subscription {
+                if Task.isCancelled { break }
+                self.currentUser = user
+            }
+        }
+    }
+    
     /// Unsubscribe from all subscriptions
     func unsubscribe() {
         balancesSubscription?.cancel()
         friendsSubscription?.cancel()
+        userSubscription?.cancel()
     }
     
     // MARK: - Computed Properties

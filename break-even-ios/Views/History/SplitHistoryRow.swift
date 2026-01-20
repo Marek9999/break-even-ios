@@ -110,6 +110,7 @@ struct StatusBadge: View {
                 status: "pending",
                 receiptFileId: nil,
                 items: nil,
+                exchangeRates: nil,
                 date: Date().timeIntervalSince1970 * 1000,
                 createdAt: Date().timeIntervalSince1970 * 1000,
                 payer: ConvexFriend(

@@ -32,6 +32,21 @@ export default defineSchema({
     .index("by_owner_email", ["ownerId", "email"])
     .index("by_owner_isSelf", ["ownerId", "isSelf"]),
 
+  // Cached exchange rates (refreshed only when creating splits if stale)
+  exchangeRates: defineTable({
+    baseCurrency: v.string(), // "USD" - all rates relative to USD
+    rates: v.object({
+      USD: v.float64(),
+      EUR: v.float64(),
+      GBP: v.float64(),
+      CAD: v.float64(),
+      AUD: v.float64(),
+      INR: v.float64(),
+      JPY: v.float64(),
+    }),
+    fetchedAt: v.number(), // Timestamp when rates were fetched
+  }).index("by_base_fetchedAt", ["baseCurrency", "fetchedAt"]),
+
   // Transactions (expense splits)
   transactions: defineTable({
     createdById: v.id("users"),
@@ -54,6 +69,22 @@ export default defineSchema({
           assignedToIds: v.array(v.id("friends")),
         })
       )
+    ),
+    // Exchange rates snapshot at time of transaction creation (for currency conversion)
+    exchangeRates: v.optional(
+      v.object({
+        baseCurrency: v.string(),
+        rates: v.object({
+          USD: v.float64(),
+          EUR: v.float64(),
+          GBP: v.float64(),
+          CAD: v.float64(),
+          AUD: v.float64(),
+          INR: v.float64(),
+          JPY: v.float64(),
+        }),
+        fetchedAt: v.number(),
+      })
     ),
     date: v.number(),
     createdAt: v.number(),

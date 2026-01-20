@@ -73,13 +73,26 @@ struct ConvexFriend: Codable, Identifiable, Hashable {
 
 // MARK: - Friend with Balance
 
-/// Friend with calculated balance
+/// Response from getFriendsWithBalances query
+struct FriendsWithBalancesResponse: Codable {
+    let balances: [FriendWithBalance]
+    let userCurrency: String
+}
+
+/// Balance breakdown by original currency
+struct CurrencyBalance: Codable, Hashable {
+    let friendOwes: Double
+    let userOwes: Double
+}
+
+/// Friend with calculated balance (amounts converted to user's default currency)
 struct FriendWithBalance: Codable, Identifiable, Hashable {
     let friend: ConvexFriend
-    let friendOwesUser: Double
-    let userOwesFriend: Double
-    let netBalance: Double
+    let friendOwesUser: Double      // Converted to user's default currency
+    let userOwesFriend: Double      // Converted to user's default currency
+    let netBalance: Double          // Converted to user's default currency
     let isOwedToUser: Bool
+    let balancesByCurrency: [String: CurrencyBalance]?  // Original amounts by currency
     
     var id: String { friend.id }
     
@@ -104,6 +117,7 @@ struct ConvexTransaction: Codable, Identifiable, Hashable {
     let status: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
+    let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
     let date: Double
     let createdAt: Double
     
@@ -121,8 +135,22 @@ struct ConvexTransaction: Codable, Identifiable, Hashable {
         status == "settled"
     }
     
+    /// Format amount with the transaction's currency
     var formattedAmount: String {
-        totalAmount.asCurrency
+        totalAmount.asCurrency(code: currency)
+    }
+    
+    /// Convert amount to a different currency using stored exchange rates
+    func convertedAmount(to targetCurrency: String) -> Double {
+        guard let rates = exchangeRates else {
+            return totalAmount
+        }
+        return rates.convert(amount: totalAmount, from: currency, to: targetCurrency)
+    }
+    
+    /// Format amount converted to a different currency
+    func formattedAmount(in targetCurrency: String) -> String {
+        convertedAmount(to: targetCurrency).asCurrency(code: targetCurrency)
     }
     
     func hash(into hasher: inout Hasher) {
@@ -163,6 +191,7 @@ struct EnrichedTransaction: Codable, Identifiable {
     let status: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
+    let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
     let date: Double
     let createdAt: Double
     let payer: ConvexFriend?
@@ -179,8 +208,22 @@ struct EnrichedTransaction: Codable, Identifiable {
         status == "settled"
     }
     
+    /// Format amount with the transaction's currency
     var formattedAmount: String {
-        totalAmount.asCurrency
+        totalAmount.asCurrency(code: currency)
+    }
+    
+    /// Convert amount to a different currency using stored exchange rates
+    func convertedAmount(to targetCurrency: String) -> Double {
+        guard let rates = exchangeRates else {
+            return totalAmount
+        }
+        return rates.convert(amount: totalAmount, from: currency, to: targetCurrency)
+    }
+    
+    /// Format amount converted to a different currency
+    func formattedAmount(in targetCurrency: String) -> String {
+        convertedAmount(to: targetCurrency).asCurrency(code: targetCurrency)
     }
     
     var payerName: String {
@@ -302,11 +345,13 @@ struct EnrichedInvitation: Codable, Identifiable {
 
 // MARK: - Balance
 
-/// Balance summary between user and friend
+/// Balance summary between user and friend (with currency conversion)
 struct BalanceSummary: Codable {
-    let friendOwesUser: Double
-    let userOwesFriend: Double
-    let netBalance: Double
+    let friendOwesUser: Double       // Converted to user's default currency
+    let userOwesFriend: Double       // Converted to user's default currency
+    let netBalance: Double           // Converted to user's default currency
+    let userCurrency: String         // User's default currency
+    let balancesByCurrency: [String: CurrencyBalance]?  // Original amounts by currency
     
     var isOwedToUser: Bool {
         netBalance > 0
@@ -314,6 +359,11 @@ struct BalanceSummary: Codable {
     
     var displayAmount: Double {
         abs(netBalance)
+    }
+    
+    /// Format the net balance with the user's currency
+    var formattedBalance: String {
+        displayAmount.asCurrency(code: userCurrency)
     }
 }
 

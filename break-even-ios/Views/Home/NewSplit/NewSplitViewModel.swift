@@ -167,9 +167,16 @@ class NewSplitViewModel {
         items.reduce(0) { $0 + $1.amount }
     }
     
+    // MARK: - Exchange Rates
+    
+    /// Cached exchange rates for conversion (fetched from Convex action)
+    var exchangeRates: ExchangeRates?
+    var isFetchingRates = false
+    
     // MARK: - Initialization
     
-    init(preSelectedFriend: ConvexFriend? = nil) {
+    init(preSelectedFriend: ConvexFriend? = nil, defaultCurrency: String = "USD") {
+        self.currency = defaultCurrency
         self.preSelectedFriend = preSelectedFriend
         if let friend = preSelectedFriend {
             self.participants = [friend]
@@ -207,7 +214,7 @@ class NewSplitViewModel {
     }
     
     func formattedShare(for friend: ConvexFriend) -> String {
-        calculateShare(for: friend).asCurrency
+        calculateShare(for: friend).asCurrency(code: currency)
     }
     
     // MARK: - Participant Management
@@ -387,6 +394,29 @@ class NewSplitViewModel {
         throw NewSplitError.uploadFailed
     }
     
+    // MARK: - Fetch Exchange Rates
+    
+    /// Fetch exchange rates from Convex (calls API only if cache is stale)
+    func fetchExchangeRates() async throws -> ExchangeRates {
+        if let cached = exchangeRates {
+            return cached
+        }
+        
+        isFetchingRates = true
+        defer { isFetchingRates = false }
+        
+        let client = ConvexService.shared.client
+        
+        // Call the Convex action to get (potentially cached) exchange rates
+        let rates: ExchangeRates = try await client.action(
+            "currency:getOrFetchExchangeRates",
+            with: [String: String]()
+        )
+        
+        self.exchangeRates = rates
+        return rates
+    }
+    
     // MARK: - Save Transaction
     
     func save(clerkId: String) async throws {
@@ -400,6 +430,16 @@ class NewSplitViewModel {
         
         isLoading = true
         defer { isLoading = false }
+        
+        // Fetch exchange rates for currency conversion (uses cache if fresh)
+        let rates: ExchangeRates?
+        do {
+            rates = try await fetchExchangeRates()
+        } catch {
+            print("=== Warning: Could not fetch exchange rates: \(error) ===")
+            // Continue without exchange rates - balances won't be converted
+            rates = nil
+        }
         
         // Handle receipt image if we have one
         var finalReceiptFileId: String? = receiptFileId
@@ -467,6 +507,11 @@ class NewSplitViewModel {
             args["receiptFileId"] = fileId
         }
         
+        // Add exchange rates JSON if available
+        if let rates = rates, let ratesJson = rates.toJSONString() {
+            args["exchangeRatesJson"] = ratesJson
+        }
+        
         let client = ConvexService.shared.client
         let _: String = try await client.mutation(
             "transactions:createTransactionFromJson",
@@ -490,6 +535,8 @@ class NewSplitViewModel {
         scannedReceiptImage = nil
         isProcessingReceipt = false
         receiptFileId = nil
+        exchangeRates = nil
+        isFetchingRates = false
         error = nil
         
         // Re-apply pre-selected friend if any

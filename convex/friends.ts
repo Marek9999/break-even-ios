@@ -318,7 +318,37 @@ export const mergeFriendWithUser = mutation({
 });
 
 /**
+ * Helper function to convert amount using stored exchange rates
+ * All rates are relative to USD
+ */
+function convertAmount(
+  amount: number,
+  fromCurrency: string,
+  toCurrency: string,
+  rates: { USD: number; EUR: number; GBP: number; CAD: number; AUD: number; INR: number; JPY: number }
+): number {
+  if (fromCurrency === toCurrency) {
+    return amount;
+  }
+
+  const fromRate = rates[fromCurrency as keyof typeof rates];
+  const toRate = rates[toCurrency as keyof typeof rates];
+
+  if (!fromRate || !toRate) {
+    // Unknown currency, return original amount
+    return amount;
+  }
+
+  // Convert: amount in fromCurrency -> USD -> toCurrency
+  const amountInUSD = amount / fromRate;
+  const convertedAmount = amountInUSD * toRate;
+
+  return convertedAmount;
+}
+
+/**
  * Get friends who have pending balances with the user
+ * Balances are converted to user's default currency using stored exchange rates
  */
 export const getFriendsWithBalances = query({
   args: {
@@ -331,8 +361,10 @@ export const getFriendsWithBalances = query({
       .unique();
 
     if (!user) {
-      return [];
+      return { balances: [], userCurrency: "USD" };
     }
+
+    const userCurrency = user.defaultCurrency;
 
     // Get all friends
     const friends = await ctx.db
@@ -357,9 +389,12 @@ export const getFriendsWithBalances = query({
         .collect();
 
       // Calculate what friend owes user (friend has unsettled split, user paid)
-      let friendOwesUser = 0;
-      // Calculate what user owes friend (user has unsettled split, friend paid)
-      let userOwesFriend = 0;
+      // Store both original and converted amounts
+      let friendOwesUserConverted = 0;
+      let userOwesFriendConverted = 0;
+
+      // Track balances by original currency for detailed breakdown
+      const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
 
       for (const split of friendSplits) {
         const transaction = await ctx.db.get(split.transactionId);
@@ -369,9 +404,29 @@ export const getFriendsWithBalances = query({
         const payer = await ctx.db.get(transaction.paidById);
         if (!payer) continue;
 
+        const txCurrency = transaction.currency;
+        
+        // Initialize currency entry if not exists
+        if (!balancesByCurrency[txCurrency]) {
+          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+        }
+
         if (payer.isSelf) {
           // User paid, friend owes user
-          friendOwesUser += split.amount;
+          balancesByCurrency[txCurrency].friendOwes += split.amount;
+          
+          // Convert to user's currency using transaction's stored rates
+          if (transaction.exchangeRates) {
+            friendOwesUserConverted += convertAmount(
+              split.amount,
+              txCurrency,
+              userCurrency,
+              transaction.exchangeRates.rates
+            );
+          } else {
+            // No exchange rates stored, assume same currency
+            friendOwesUserConverted += split.amount;
+          }
         }
       }
 
@@ -390,24 +445,49 @@ export const getFriendsWithBalances = query({
 
           // Check if this friend paid
           if (transaction.paidById === friend._id) {
-            userOwesFriend += split.amount;
+            const txCurrency = transaction.currency;
+            
+            // Initialize currency entry if not exists
+            if (!balancesByCurrency[txCurrency]) {
+              balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+            }
+            
+            balancesByCurrency[txCurrency].userOwes += split.amount;
+            
+            // Convert to user's currency using transaction's stored rates
+            if (transaction.exchangeRates) {
+              userOwesFriendConverted += convertAmount(
+                split.amount,
+                txCurrency,
+                userCurrency,
+                transaction.exchangeRates.rates
+              );
+            } else {
+              // No exchange rates stored, assume same currency
+              userOwesFriendConverted += split.amount;
+            }
           }
         }
       }
 
-      const netBalance = friendOwesUser - userOwesFriend;
+      const netBalanceConverted = friendOwesUserConverted - userOwesFriendConverted;
 
-      if (netBalance !== 0) {
+      if (Math.abs(netBalanceConverted) > 0.01) { // Use small threshold for floating point
         friendsWithBalances.push({
           friend,
-          friendOwesUser,
-          userOwesFriend,
-          netBalance,
-          isOwedToUser: netBalance > 0,
+          friendOwesUser: friendOwesUserConverted,
+          userOwesFriend: userOwesFriendConverted,
+          netBalance: netBalanceConverted,
+          isOwedToUser: netBalanceConverted > 0,
+          // Include breakdown by original currency for reference
+          balancesByCurrency,
         });
       }
     }
 
-    return friendsWithBalances;
+    return {
+      balances: friendsWithBalances,
+      userCurrency,
+    };
   },
 });

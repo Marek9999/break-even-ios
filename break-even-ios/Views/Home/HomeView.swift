@@ -41,7 +41,8 @@ struct HomeView: View {
             OwedTabSelector(
                 selectedTab: $selectedTab,
                 owedToYouAmount: viewModel.totalOwedToMe,
-                youOweAmount: viewModel.totalIOwe
+                youOweAmount: viewModel.totalIOwe,
+                currencyCode: viewModel.userCurrency
             )
             .padding(.horizontal, 20)
             .padding(.top, 24)
@@ -64,7 +65,8 @@ struct HomeView: View {
                 NewSplitSheet(
                     preSelectedFriend: friend,
                     allFriends: viewModel.allFriends,
-                    selfFriend: viewModel.selfFriend
+                    selfFriend: viewModel.selfFriend,
+                    userDefaultCurrency: viewModel.userCurrency
                 )
                 .onDisappear {
                     preSelectedFriendForSplit = nil
@@ -72,7 +74,8 @@ struct HomeView: View {
             } else {
                 NewSplitSheet(
                     allFriends: viewModel.allFriends,
-                    selfFriend: viewModel.selfFriend
+                    selfFriend: viewModel.selfFriend,
+                    userDefaultCurrency: viewModel.userCurrency
                 )
             }
         }
@@ -82,7 +85,8 @@ struct HomeView: View {
             NewSplitSheet(
                 receiptResult: result,
                 allFriends: viewModel.allFriends,
-                selfFriend: viewModel.selfFriend
+                selfFriend: viewModel.selfFriend,
+                userDefaultCurrency: viewModel.userCurrency
             )
         }
         .fullScreenCover(isPresented: $showReceiptCamera) {
@@ -107,7 +111,9 @@ struct HomeView: View {
                 balance: BalanceSummary(
                     friendOwesUser: friendWithBalance.friendOwesUser,
                     userOwesFriend: friendWithBalance.userOwesFriend,
-                    netBalance: friendWithBalance.netBalance
+                    netBalance: friendWithBalance.netBalance,
+                    userCurrency: viewModel.userCurrency,
+                    balancesByCurrency: friendWithBalance.balancesByCurrency
                 ),
                 onStartSplit: { friend in
                     selectedFriend = nil
@@ -134,6 +140,7 @@ struct HomeView: View {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToBalances(clerkId: clerkId)
         viewModel.subscribeToFriends(clerkId: clerkId)
+        viewModel.subscribeToUser(clerkId: clerkId)
     }
     
     // MARK: - Bubble Cluster Section
@@ -146,6 +153,7 @@ struct HomeView: View {
             BubbleClusterView(
                 contacts: currentTabData.map { ($0.friend, abs($0.netBalance)) },
                 isOwedToUser: selectedTab == .owedToYou,
+                currencyCode: viewModel.userCurrency,
                 onPersonTap: { friend in
                     // Using sheet(item:) so just setting selectedFriend triggers the sheet
                     selectedFriend = currentTabData.first(where: { $0.friend.id == friend.id })
