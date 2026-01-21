@@ -27,6 +27,7 @@ class HistoryViewModel {
     var selectedFilter: HistoryFilter = .all
     var sortOrder: SortOrder = .newest
     var searchText: String = ""
+    var selectedFriendId: String? = nil  // nil means "All Friends"
     
     // UI State
     var selectedTransaction: EnrichedTransaction?
@@ -94,12 +95,42 @@ class HistoryViewModel {
         userSubscription?.cancel()
     }
     
+    // MARK: - Unique Friends for Filter
+    
+    /// Get all unique friends involved in transactions (excluding self)
+    var uniqueFriends: [ConvexFriend] {
+        var friendsDict: [String: ConvexFriend] = [:]
+        
+        for transaction in transactions {
+            // Add payer if not self
+            if let payer = transaction.payer, !payer.isSelf {
+                friendsDict[payer.id] = payer
+            }
+            
+            // Add split participants who are not self
+            for split in transaction.splits {
+                if let friend = split.friend, !friend.isSelf {
+                    friendsDict[friend.id] = friend
+                }
+            }
+        }
+        
+        // Sort alphabetically by name
+        return Array(friendsDict.values).sorted { $0.name < $1.name }
+    }
+    
+    /// Currently selected friend for display
+    var selectedFriend: ConvexFriend? {
+        guard let friendId = selectedFriendId else { return nil }
+        return uniqueFriends.first { $0.id == friendId }
+    }
+    
     // MARK: - Filtering & Sorting
     
     var filteredTransactions: [EnrichedTransaction] {
         var result = transactions
         
-        // Apply filter
+        // Apply status filter
         switch selectedFilter {
         case .all:
             break
@@ -107,6 +138,18 @@ class HistoryViewModel {
             result = result.filter { !$0.isFullySettled }
         case .settled:
             result = result.filter { $0.isFullySettled }
+        }
+        
+        // Apply friend filter
+        if let friendId = selectedFriendId {
+            result = result.filter { transaction in
+                // Check if friend is the payer
+                if transaction.payer?.id == friendId {
+                    return true
+                }
+                // Check if friend is in the splits
+                return transaction.splits.contains { $0.friend?.id == friendId }
+            }
         }
         
         // Apply search
@@ -126,5 +169,10 @@ class HistoryViewModel {
         }
         
         return result
+    }
+    
+    /// Clear friend filter
+    func clearFriendFilter() {
+        selectedFriendId = nil
     }
 }

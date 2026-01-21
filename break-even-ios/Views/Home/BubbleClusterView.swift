@@ -120,7 +120,7 @@ struct BubbleView: View {
     
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 4) {
+            VStack(spacing: -4) {
                 // Avatar
                 if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
                     AsyncImage(url: url) { image in
@@ -130,46 +130,36 @@ struct BubbleView: View {
                     } placeholder: {
                         initialsView
                     }
-                    .frame(width: size * 0.5, height: size * 0.5)
+                    .frame(width: size, height: size)
                     .clipShape(Circle())
+                    .padding(2)
+                    .glassEffect(.regular.interactive(), in: Circle())
                 } else {
                     initialsView
                 }
                 
-                // Name
-                Text(friend.name.split(separator: " ").first.map(String.init) ?? friend.name)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                
                 // Amount in user's currency
                 Text(amount.asCurrency(code: currencyCode))
-                    .font(.caption2)
+                    .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundStyle(isOwedToUser ? .accent : .appDestructive)
+                    .foregroundStyle(isOwedToUser ? Color.accent : Color.appDestructive)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial)
+                    .background(isOwedToUser ? Color.accent.opacity(0.1) : Color.appDestructive.opacity(0.1))
+                    .clipShape(Capsule())
             }
             .frame(width: size, height: size)
-            .background(
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                isOwedToUser ? Color.accent.opacity(0.3) : Color.appDestructive.opacity(0.3),
-                                lineWidth: 2
-                            )
-                    )
-            )
         }
         .buttonStyle(BubbleButtonStyle())
     }
     
     private var initialsView: some View {
         Text(friend.initials)
-            .font(.system(size: size * 0.2, weight: .semibold))
+            .font(.system(size: size * 0.3, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: size * 0.5, height: size * 0.5)
-            .background(Color.accentColor)
+            .frame(width: size, height: size)
+            .background(isOwedToUser ? Color.accent.opacity(0.6) : Color.appDestructive.opacity(0.6))
             .clipShape(Circle())
     }
 }

@@ -24,6 +24,8 @@ struct SplitDetailView: View {
     @State private var detailedTransaction: EnrichedTransaction?
     @State private var isLoading = false
     @State private var showDeleteAlert = false
+    @State private var selectedSplitForSettlement: EnrichedSplit?
+    @State private var showSettleSheet = false
     
     private var displayTransaction: EnrichedTransaction {
         detailedTransaction ?? transaction
@@ -74,6 +76,41 @@ struct SplitDetailView: View {
         } message: {
             Text("Are you sure you want to delete this split? This cannot be undone.")
         }
+        .sheet(isPresented: $showSettleSheet) {
+            if let split = selectedSplitForSettlement {
+                SettleAmountSheet(
+                    maxAmount: split.remainingAmount,
+                    currency: displayTransaction.currency,
+                    friendName: split.personName,
+                    isUserPaying: false,  // From split detail, user is typically receiving
+                    onSettle: { amount in
+                        try await settlePartialSplit(split: split, amount: amount)
+                    }
+                )
+                .presentationDetents([.medium])
+            }
+        }
+    }
+    
+    // MARK: - Settle Partial Split
+    
+    private func settlePartialSplit(split: EnrichedSplit, amount: Double) async throws {
+        guard let clerkId = clerk.user?.id else {
+            throw ConvexServiceError.notAuthenticated
+        }
+        
+        let _: SettlePartialSplitResponse = try await convexService.client.mutation(
+            "transactions:settlePartialSplit",
+            with: [
+                "clerkId": clerkId,
+                "splitId": split.id,
+                "amount": String(amount),
+                "currency": displayTransaction.currency
+            ]
+        )
+        
+        // Reload details to get updated split data
+        loadDetails()
     }
     
     // MARK: - Load Details
@@ -189,7 +226,11 @@ struct SplitDetailView: View {
                         currencyCode: displayTransaction.currency,
                         showConversion: showCurrencyConversion,
                         userCurrency: userCurrency,
-                        exchangeRates: displayTransaction.exchangeRates
+                        exchangeRates: displayTransaction.exchangeRates,
+                        onSettle: canSettle(split: split) ? { selectedSplit in
+                            selectedSplitForSettlement = selectedSplit
+                            showSettleSheet = true
+                        } : nil
                     )
                 }
             }
@@ -197,6 +238,16 @@ struct SplitDetailView: View {
             .background(Color.secondary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+    }
+    
+    /// Check if a split can be settled by the user
+    private func canSettle(split: EnrichedSplit) -> Bool {
+        // Can settle if:
+        // 1. Split is not fully settled
+        // 2. Split is not for "self" (the payer's own split doesn't need settling)
+        guard !split.isSettled else { return false }
+        guard let friend = split.friend else { return false }
+        return !friend.isSelf
     }
     
     // MARK: - Items Section
@@ -285,9 +336,18 @@ struct SplitRow: View {
     let showConversion: Bool
     let userCurrency: String
     let exchangeRates: ExchangeRates?
+    var onSettle: ((EnrichedSplit) -> Void)? = nil
     
-    /// Converted amount in user's currency
-    private var convertedAmount: Double {
+    /// Converted amount in user's currency (for remaining amount)
+    private var convertedRemainingAmount: Double {
+        guard let rates = exchangeRates else {
+            return split.remainingAmount
+        }
+        return rates.convert(amount: split.remainingAmount, from: currencyCode, to: userCurrency)
+    }
+    
+    /// Converted full amount in user's currency
+    private var convertedFullAmount: Double {
         guard let rates = exchangeRates else {
             return split.amount
         }
@@ -307,29 +367,68 @@ struct SplitRow: View {
                     .clipShape(Circle())
             }
             
-            // Name
-            Text(split.personName)
-                .font(.body)
-            
-            Spacer()
-            
-            // Amount in original currency
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(split.amount.asCurrency(code: currencyCode))
+            // Name and partial status
+            VStack(alignment: .leading, spacing: 2) {
+                Text(split.personName)
                     .font(.body)
-                    .fontWeight(.medium)
                 
-                // Show converted amount if different currency
-                if showConversion {
-                    Text("(\(convertedAmount.asCurrency(code: userCurrency)))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // Show partial settlement progress if applicable
+                if split.isPartiallySettled {
+                    Text("Paid \((split.settledAmount ?? 0).asCurrency(code: currencyCode)) of \(split.amount.asCurrency(code: currencyCode))")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
                 }
             }
             
-            // Settled indicator
-            Image(systemName: split.isSettled ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(split.isSettled ? .green : .secondary)
+            Spacer()
+            
+            // Amount display - shows remaining for partial, full for others
+            VStack(alignment: .trailing, spacing: 2) {
+                if split.isPartiallySettled {
+                    // Show remaining amount for partial settlements
+                    Text(split.remainingAmount.asCurrency(code: currencyCode))
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.orange)
+                    
+                    if showConversion {
+                        Text("(\(convertedRemainingAmount.asCurrency(code: userCurrency)))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    // Show full amount
+                    Text(split.amount.asCurrency(code: currencyCode))
+                        .font(.body)
+                        .fontWeight(.medium)
+                    
+                    if showConversion {
+                        Text("(\(convertedFullAmount.asCurrency(code: userCurrency)))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            
+            // Status indicator or Settle button
+            if split.isSettled {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if let onSettle = onSettle {
+                Button {
+                    onSettle(split)
+                } label: {
+                    Text("Settle")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.glass)
+            } else {
+                Image(systemName: split.isPartiallySettled ? "circle.lefthalf.filled" : "circle")
+                    .foregroundStyle(split.isPartiallySettled ? .orange : .secondary)
+            }
         }
         .padding(.vertical, 4)
     }

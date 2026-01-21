@@ -255,6 +255,7 @@ struct ConvexSplit: Codable, Identifiable, Hashable {
     let transactionId: String
     let friendId: String
     let amount: Double
+    let settledAmount: Double?  // Amount already settled (0 to amount), supports partial settlements
     let percentage: Double?
     let isSettled: Bool
     let settledAt: Double?
@@ -265,6 +266,17 @@ struct ConvexSplit: Codable, Identifiable, Hashable {
     
     var formattedAmount: String {
         amount.asCurrency
+    }
+    
+    /// Remaining amount to be settled
+    var remainingAmount: Double {
+        amount - (settledAmount ?? 0)
+    }
+    
+    /// Whether this split is partially (but not fully) settled
+    var isPartiallySettled: Bool {
+        let settled = settledAmount ?? 0
+        return settled > 0 && settled < amount
     }
     
     var settledAtDate: Date? {
@@ -279,6 +291,7 @@ struct EnrichedSplit: Codable, Identifiable, Hashable {
     let transactionId: String
     let friendId: String
     let amount: Double
+    let settledAmount: Double?  // Amount already settled (0 to amount), supports partial settlements
     let percentage: Double?
     let isSettled: Bool
     let settledAt: Double?
@@ -290,6 +303,22 @@ struct EnrichedSplit: Codable, Identifiable, Hashable {
     
     var formattedAmount: String {
         amount.asCurrency
+    }
+    
+    /// Remaining amount to be settled
+    var remainingAmount: Double {
+        amount - (settledAmount ?? 0)
+    }
+    
+    /// Whether this split is partially (but not fully) settled
+    var isPartiallySettled: Bool {
+        let settled = settledAmount ?? 0
+        return settled > 0 && !isSettled
+    }
+    
+    /// Format remaining amount for display
+    func formattedRemaining(code: String) -> String {
+        remainingAmount.asCurrency(code: code)
     }
     
     var personName: String {
@@ -413,6 +442,164 @@ enum TransactionStatus: String, Codable {
         case .pending: return "Pending"
         case .partial: return "Partial"
         case .settled: return "Settled"
+        }
+    }
+}
+
+// MARK: - Settlement
+
+/// Settlement record for history display
+struct Settlement: Codable, Identifiable {
+    let _id: String
+    let createdById: String
+    let friendId: String
+    let amount: Double
+    let currency: String
+    let direction: String  // "to_friend" (user pays) or "from_friend" (friend pays user)
+    let note: String?
+    let exchangeRates: ExchangeRates?
+    let affectedSplitsJson: String  // JSON string of [{splitId, amountApplied}]
+    let settledAt: Double
+    let createdAt: Double
+    
+    var id: String { _id }
+    
+    var settledAtDate: Date {
+        Date(timeIntervalSince1970: settledAt / 1000)
+    }
+    
+    var createdAtDate: Date {
+        Date(timeIntervalSince1970: createdAt / 1000)
+    }
+    
+    /// Whether user paid friend (vs friend paid user)
+    var isUserPaying: Bool {
+        direction == "to_friend"
+    }
+    
+    /// Formatted amount with currency
+    var formattedAmount: String {
+        amount.asCurrency(code: currency)
+    }
+    
+    /// Parse affected splits from JSON
+    var affectedSplits: [AffectedSplit] {
+        guard let data = affectedSplitsJson.data(using: .utf8),
+              let splits = try? JSONDecoder().decode([AffectedSplit].self, from: data)
+        else { return [] }
+        return splits
+    }
+}
+
+/// Affected split in a settlement record
+struct AffectedSplit: Codable {
+    let splitId: String
+    let amountApplied: Double
+}
+
+/// Response from settleAmount mutation
+struct SettleAmountResponse: Codable {
+    let settlementId: String
+    let settledAmount: Double
+    let affectedCount: Int
+}
+
+/// Response from settlePartialSplit mutation
+struct SettlePartialSplitResponse: Codable {
+    let settlementId: String
+    let settledAmount: Double
+    let isFullySettled: Bool
+}
+
+// MARK: - Enriched Settlement (with converted amounts)
+
+/// Settlement with converted amount for display in user's currency
+struct EnrichedSettlement: Codable, Identifiable {
+    let _id: String
+    let createdById: String
+    let friendId: String
+    let amount: Double
+    let currency: String
+    let direction: String
+    let note: String?
+    let balanceBeforeSettlement: Double?  // Total owed before this settlement (for "X out of Y" display)
+    let exchangeRates: ExchangeRates?
+    let affectedSplitsJson: String
+    let settledAt: Double
+    let createdAt: Double
+    let convertedAmount: Double  // Amount in user's currency
+    let convertedCurrency: String  // User's currency code
+    let convertedBalanceBefore: Double?  // balanceBeforeSettlement in user's currency
+    
+    var id: String { _id }
+    
+    var settledAtDate: Date {
+        Date(timeIntervalSince1970: settledAt / 1000)
+    }
+    
+    /// Whether user paid friend (vs friend paid user)
+    var isUserPaying: Bool {
+        direction == "to_friend"
+    }
+    
+    /// Formatted amount in user's currency
+    var formattedConvertedAmount: String {
+        convertedAmount.asCurrency(code: convertedCurrency)
+    }
+    
+    /// Formatted "out of" amount in user's currency (if available)
+    var formattedConvertedBalanceBefore: String? {
+        guard let balance = convertedBalanceBefore else { return nil }
+        return balance.asCurrency(code: convertedCurrency)
+    }
+    
+    /// Formatted original amount
+    var formattedAmount: String {
+        amount.asCurrency(code: currency)
+    }
+}
+
+// MARK: - Activity with Friend Response
+
+/// Response from getActivityWithFriend query
+struct ActivityWithFriendResponse: Codable {
+    let transactions: [EnrichedTransaction]
+    let settlements: [EnrichedSettlement]
+    let userCurrency: String
+}
+
+// MARK: - Activity Item (for combined feed)
+
+/// Unified activity item for displaying transactions and settlements in a combined list
+enum ActivityItem: Identifiable {
+    case transaction(EnrichedTransaction, originalAmount: Double, originalCurrency: String, isOwed: Bool)
+    case settlement(EnrichedSettlement)
+    
+    var id: String {
+        switch self {
+        case .transaction(let tx, _, _, _):
+            return "tx-\(tx.id)"
+        case .settlement(let s):
+            return "settle-\(s.id)"
+        }
+    }
+    
+    var date: Date {
+        switch self {
+        case .transaction(let tx, _, _, _):
+            return tx.dateValue
+        case .settlement(let s):
+            return s.settledAtDate
+        }
+    }
+    
+    /// Sort key (timestamp in milliseconds)
+    var sortTimestamp: Double {
+        switch self {
+        case .transaction(let tx, _, _, _):
+            return tx.date
+        case .settlement(let s):
+            return s.settledAt
         }
     }
 }

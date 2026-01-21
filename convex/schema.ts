@@ -98,6 +98,7 @@ export default defineSchema({
     transactionId: v.id("transactions"),
     friendId: v.id("friends"),
     amount: v.float64(),
+    settledAmount: v.optional(v.float64()), // How much has been settled (0 to amount), supports partial settlements
     percentage: v.optional(v.float64()),
     isSettled: v.boolean(),
     settledAt: v.optional(v.number()),
@@ -107,6 +108,40 @@ export default defineSchema({
     .index("by_transaction", ["transactionId"])
     .index("by_friend", ["friendId"])
     .index("by_friend_settled", ["friendId", "isSettled"]),
+
+  // Settlement records - tracks settlement history/audit trail
+  settlements: defineTable({
+    createdById: v.id("users"), // Who recorded this settlement
+    friendId: v.id("friends"), // The friend involved in settlement
+    amount: v.float64(), // Amount settled (always positive)
+    currency: v.string(), // Currency of settlement
+    direction: v.string(), // "to_friend" (user pays) or "from_friend" (friend pays user)
+    note: v.optional(v.string()), // Optional note/memo
+    balanceBeforeSettlement: v.optional(v.float64()), // Total owed before this settlement (for display "X out of Y")
+    // Exchange rates snapshot for currency conversion display
+    exchangeRates: v.optional(
+      v.object({
+        baseCurrency: v.string(),
+        rates: v.object({
+          USD: v.float64(),
+          EUR: v.float64(),
+          GBP: v.float64(),
+          CAD: v.float64(),
+          AUD: v.float64(),
+          INR: v.float64(),
+          JPY: v.float64(),
+        }),
+        fetchedAt: v.number(),
+      })
+    ),
+    // Links to which splits were affected (stored as JSON for iOS compatibility)
+    affectedSplitsJson: v.string(), // JSON array: [{splitId, amountApplied}]
+    settledAt: v.number(), // When settlement happened
+    createdAt: v.number(), // When record was created
+  })
+    .index("by_creator", ["createdById"])
+    .index("by_friend", ["friendId"])
+    .index("by_settledAt", ["settledAt"]),
 
   // Friend invitations
   invitations: defineTable({

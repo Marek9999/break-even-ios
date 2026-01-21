@@ -98,6 +98,7 @@ export const createTransaction = mutation({
         transactionId,
         friendId: split.friendId,
         amount: split.amount,
+        settledAmount: isSettled ? split.amount : 0, // Initialize settledAmount
         percentage: split.percentage,
         isSettled,
         settledAt: isSettled ? Date.now() : undefined,
@@ -233,6 +234,7 @@ export const createTransactionFromJson = mutation({
         transactionId,
         friendId,
         amount: split.amount,
+        settledAmount: isSettled ? split.amount : 0, // Initialize settledAmount
         percentage: split.percentage ?? undefined,
         isSettled,
         settledAt: isSettled ? Date.now() : undefined,
@@ -565,6 +567,423 @@ export const settleAllWithFriend = mutation({
 });
 
 /**
+ * Settle a specific amount with a friend (supports partial settlements)
+ * Applies settlement FIFO to oldest splits first
+ */
+export const settleAmount = mutation({
+  args: {
+    clerkId: v.string(),
+    friendId: v.id("friends"),
+    amount: v.string(), // Amount as string for iOS compatibility
+    currency: v.string(),
+    direction: v.string(), // "to_friend" (user pays) or "from_friend" (friend pays user)
+    note: v.optional(v.string()),
+    exchangeRatesJson: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const amount = parseFloat(args.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new Error("Invalid amount");
+    }
+
+    // Get self friend
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (!selfFriend) {
+      throw new Error("Self friend not found");
+    }
+
+    // Determine which splits to settle based on direction
+    // "from_friend" = friend paying user back (settle splits where friend owes - friend's splits in user-paid transactions)
+    // "to_friend" = user paying friend (settle splits where user owes - user's splits in friend-paid transactions)
+    
+    let splitsToSettle: Array<{
+      split: any;
+      transaction: any;
+      remaining: number;
+    }> = [];
+
+    if (args.direction === "from_friend") {
+      // Friend is paying user - settle friend's unsettled splits in transactions where user paid
+      const friendSplits = await ctx.db
+        .query("splits")
+        .withIndex("by_friend_settled", (q) =>
+          q.eq("friendId", args.friendId).eq("isSettled", false)
+        )
+        .collect();
+
+      for (const split of friendSplits) {
+        const transaction = await ctx.db.get(split.transactionId);
+        if (!transaction) continue;
+        
+        // Only include if user paid (payer is self)
+        const payer = await ctx.db.get(transaction.paidById);
+        if (payer && payer.isSelf) {
+          const currentSettled = split.settledAmount ?? 0;
+          const remaining = split.amount - currentSettled;
+          if (remaining > 0) {
+            splitsToSettle.push({ split, transaction, remaining });
+          }
+        }
+      }
+    } else {
+      // User is paying friend - settle user's unsettled splits in transactions where friend paid
+      const userSplits = await ctx.db
+        .query("splits")
+        .withIndex("by_friend_settled", (q) =>
+          q.eq("friendId", selfFriend._id).eq("isSettled", false)
+        )
+        .collect();
+
+      for (const split of userSplits) {
+        const transaction = await ctx.db.get(split.transactionId);
+        if (!transaction) continue;
+        
+        // Only include if friend paid
+        if (transaction.paidById === args.friendId) {
+          const currentSettled = split.settledAmount ?? 0;
+          const remaining = split.amount - currentSettled;
+          if (remaining > 0) {
+            splitsToSettle.push({ split, transaction, remaining });
+          }
+        }
+      }
+    }
+
+    // Sort by transaction date ascending (oldest first - FIFO)
+    splitsToSettle.sort((a, b) => a.transaction.date - b.transaction.date);
+
+    // Calculate total balance before settlement (sum of all remaining amounts)
+    const balanceBeforeSettlement = splitsToSettle.reduce(
+      (sum, { remaining }) => sum + remaining,
+      0
+    );
+
+    // Apply settlement FIFO
+    let remainingAmount = amount;
+    const affectedSplits: Array<{ splitId: string; amountApplied: number }> = [];
+    const transactionIds = new Set<Id<"transactions">>();
+
+    for (const { split, transaction } of splitsToSettle) {
+      if (remainingAmount <= 0) break;
+
+      const currentSettled = split.settledAmount ?? 0;
+      const splitRemaining = split.amount - currentSettled;
+      const toApply = Math.min(remainingAmount, splitRemaining);
+
+      const newSettledAmount = currentSettled + toApply;
+      const isNowFullySettled = newSettledAmount >= split.amount - 0.001; // Small tolerance for floating point
+
+      await ctx.db.patch(split._id, {
+        settledAmount: newSettledAmount,
+        isSettled: isNowFullySettled,
+        settledAt: isNowFullySettled ? Date.now() : split.settledAt,
+        settledById: isNowFullySettled ? user._id : split.settledById,
+      });
+
+      affectedSplits.push({ splitId: split._id, amountApplied: toApply });
+      transactionIds.add(split.transactionId);
+      remainingAmount -= toApply;
+    }
+
+    // Parse exchange rates if provided
+    let exchangeRates = undefined;
+    if (args.exchangeRatesJson) {
+      exchangeRates = JSON.parse(args.exchangeRatesJson);
+    }
+
+    // Create settlement record with balance before settlement for "X out of Y" display
+    const settlementId = await ctx.db.insert("settlements", {
+      createdById: user._id,
+      friendId: args.friendId,
+      amount: amount - remainingAmount, // Actual amount settled
+      currency: args.currency,
+      direction: args.direction,
+      note: args.note,
+      balanceBeforeSettlement, // Store for "settled $X out of $Y" display
+      exchangeRates,
+      affectedSplitsJson: JSON.stringify(affectedSplits),
+      settledAt: Date.now(),
+      createdAt: Date.now(),
+    });
+
+    // Update transaction statuses
+    for (const txId of transactionIds) {
+      await updateTransactionStatus(ctx, txId);
+    }
+
+    return {
+      settlementId,
+      settledAmount: amount - remainingAmount,
+      affectedCount: affectedSplits.length,
+    };
+  },
+});
+
+/**
+ * Settle a partial amount on a specific split
+ */
+export const settlePartialSplit = mutation({
+  args: {
+    clerkId: v.string(),
+    splitId: v.id("splits"),
+    amount: v.string(), // Amount as string for iOS compatibility
+    currency: v.string(),
+    exchangeRatesJson: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const split = await ctx.db.get(args.splitId);
+    if (!split) {
+      throw new Error("Split not found");
+    }
+
+    if (split.isSettled) {
+      throw new Error("Split already fully settled");
+    }
+
+    const amount = parseFloat(args.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new Error("Invalid amount");
+    }
+
+    const currentSettled = split.settledAmount ?? 0;
+    const remaining = split.amount - currentSettled;
+    const toApply = Math.min(amount, remaining); // Cap at remaining
+
+    const newSettledAmount = currentSettled + toApply;
+    const isNowFullySettled = newSettledAmount >= split.amount - 0.001; // Small tolerance
+
+    // Update split
+    await ctx.db.patch(args.splitId, {
+      settledAmount: newSettledAmount,
+      isSettled: isNowFullySettled,
+      settledAt: isNowFullySettled ? Date.now() : undefined,
+      settledById: isNowFullySettled ? user._id : undefined,
+    });
+
+    // Determine direction based on who owes whom
+    const transaction = await ctx.db.get(split.transactionId);
+    if (!transaction) {
+      throw new Error("Transaction not found");
+    }
+
+    const friend = await ctx.db.get(split.friendId);
+    
+    // If the split is for "self", user owes the payer (friend)
+    // If the split is for a friend, friend owes the user
+    const direction = friend?.isSelf ? "to_friend" : "from_friend";
+    const settlementFriendId = friend?.isSelf
+      ? transaction.paidById // User owes friend who paid
+      : split.friendId; // Friend owes user
+
+    // Parse exchange rates if provided
+    let exchangeRates = undefined;
+    if (args.exchangeRatesJson) {
+      exchangeRates = JSON.parse(args.exchangeRatesJson);
+    }
+
+    // Create settlement record with balance before settlement (remaining amount of this split)
+    const settlementId = await ctx.db.insert("settlements", {
+      createdById: user._id,
+      friendId: settlementFriendId,
+      amount: toApply,
+      currency: args.currency,
+      direction,
+      balanceBeforeSettlement: remaining, // The remaining amount before this settlement
+      exchangeRates,
+      affectedSplitsJson: JSON.stringify([{ splitId: args.splitId, amountApplied: toApply }]),
+      settledAt: Date.now(),
+      createdAt: Date.now(),
+    });
+
+    // Update transaction status
+    await updateTransactionStatus(ctx, split.transactionId);
+
+    return {
+      settlementId,
+      settledAmount: toApply,
+      isFullySettled: isNowFullySettled,
+    };
+  },
+});
+
+/**
+ * Get settlement history with a specific friend
+ */
+export const getSettlementHistory = query({
+  args: {
+    clerkId: v.string(),
+    friendId: v.id("friends"),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    if (!user) {
+      return [];
+    }
+
+    const settlements = await ctx.db
+      .query("settlements")
+      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
+      .order("desc")
+      .collect();
+
+    // Filter to only settlements created by this user
+    return settlements.filter((s) => s.createdById === user._id);
+  },
+});
+
+/**
+ * Get activity (transactions + settlements) with a specific friend
+ * Used for the PersonDetailSheet to show a combined chronological feed
+ */
+export const getActivityWithFriend = query({
+  args: {
+    clerkId: v.string(),
+    friendId: v.id("friends"),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    if (!user) {
+      return { transactions: [], settlements: [], userCurrency: "USD" };
+    }
+
+    const userCurrency = user.defaultCurrency;
+
+    // Get self friend
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (!selfFriend) {
+      return { transactions: [], settlements: [], userCurrency };
+    }
+
+    // Get all splits for this friend
+    const friendSplits = await ctx.db
+      .query("splits")
+      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
+      .collect();
+
+    // Get unique transaction IDs
+    const transactionIds = [...new Set(friendSplits.map((s) => s.transactionId))];
+
+    // Fetch transactions and filter to only include those created by this user
+    const transactions = [];
+    for (const txId of transactionIds) {
+      const tx = await ctx.db.get(txId);
+      if (tx && tx.createdById === user._id) {
+        const payer = await ctx.db.get(tx.paidById);
+        const splits = await ctx.db
+          .query("splits")
+          .withIndex("by_transaction", (q) => q.eq("transactionId", txId))
+          .collect();
+
+        const enrichedSplits = await Promise.all(
+          splits.map(async (split) => {
+            const friend = await ctx.db.get(split.friendId);
+            return { ...split, friend };
+          })
+        );
+
+        // Calculate if this transaction involves both user and friend
+        const involvesUser = splits.some((s) => s.friendId === selfFriend._id);
+        const involvesFriend = splits.some((s) => s.friendId === args.friendId);
+
+        if (involvesUser && involvesFriend) {
+          transactions.push({
+            ...tx,
+            payer,
+            splits: enrichedSplits,
+          });
+        }
+      }
+    }
+
+    // Sort by date descending
+    transactions.sort((a, b) => b.date - a.date);
+
+    // Get settlements with this friend (created by this user)
+    const settlements = await ctx.db
+      .query("settlements")
+      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
+      .collect();
+
+    // Filter to only settlements created by this user and convert amounts to user currency
+    const filteredSettlements = settlements
+      .filter((s) => s.createdById === user._id)
+      .map((s) => {
+        // Convert settlement amount to user's currency if needed
+        let convertedAmount = s.amount;
+        let convertedBalanceBefore = s.balanceBeforeSettlement ?? null;
+        
+        if (s.currency !== userCurrency && s.exchangeRates) {
+          convertedAmount = convertAmountHelper(
+            s.amount,
+            s.currency,
+            userCurrency,
+            s.exchangeRates.rates
+          );
+          // Also convert balanceBeforeSettlement if present
+          if (s.balanceBeforeSettlement !== undefined) {
+            convertedBalanceBefore = convertAmountHelper(
+              s.balanceBeforeSettlement,
+              s.currency,
+              userCurrency,
+              s.exchangeRates.rates
+            );
+          }
+        }
+        return {
+          ...s,
+          convertedAmount,
+          convertedCurrency: userCurrency,
+          convertedBalanceBefore,
+        };
+      });
+
+    return {
+      transactions,
+      settlements: filteredSettlements,
+      userCurrency,
+    };
+  },
+});
+
+/**
  * Helper function to convert amount using stored exchange rates
  * All rates are relative to USD
  */
@@ -592,6 +1011,7 @@ function convertAmountHelper(
 /**
  * Get balance summary with a specific friend
  * Balances are converted to user's default currency using stored exchange rates
+ * Supports partial settlements using settledAmount field
  */
 export const getBalanceWithFriend = query({
   args: {
@@ -625,16 +1045,27 @@ export const getBalanceWithFriend = query({
     // Track balances by original currency
     const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
 
-    // Get all unsettled splits for this friend (what friend owes)
+    // Helper to get remaining amount from a split (supports partial settlements)
+    const getRemainingAmount = (split: { amount: number; settledAmount?: number; isSettled: boolean }) => {
+      // For backward compatibility: if settledAmount is undefined, use isSettled boolean
+      if (split.settledAmount !== undefined) {
+        return Math.max(0, split.amount - split.settledAmount);
+      }
+      return split.isSettled ? 0 : split.amount;
+    };
+
+    // Get all unsettled/partially-settled splits for this friend (what friend owes)
+    // We still use the index for efficiency, but also need to check partially settled splits
     const friendSplits = await ctx.db
       .query("splits")
-      .withIndex("by_friend_settled", (q) =>
-        q.eq("friendId", args.friendId).eq("isSettled", false)
-      )
+      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
       .collect();
 
     let friendOwesUserConverted = 0;
     for (const split of friendSplits) {
+      const remaining = getRemainingAmount(split);
+      if (remaining <= 0) continue;
+
       const transaction = await ctx.db.get(split.transactionId);
       if (!transaction) continue;
 
@@ -643,36 +1074,37 @@ export const getBalanceWithFriend = query({
       if (payer && payer.isSelf) {
         const txCurrency = transaction.currency;
         
-        // Track by original currency
+        // Track by original currency (remaining amount)
         if (!balancesByCurrency[txCurrency]) {
           balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
         }
-        balancesByCurrency[txCurrency].friendOwes += split.amount;
+        balancesByCurrency[txCurrency].friendOwes += remaining;
         
         // Convert to user's currency
         if (transaction.exchangeRates) {
           friendOwesUserConverted += convertAmountHelper(
-            split.amount,
+            remaining,
             txCurrency,
             userCurrency,
             transaction.exchangeRates.rates
           );
         } else {
-          friendOwesUserConverted += split.amount;
+          friendOwesUserConverted += remaining;
         }
       }
     }
 
-    // Get user's unsettled splits where friend paid (what user owes)
+    // Get user's unsettled/partially-settled splits where friend paid (what user owes)
     const userSplits = await ctx.db
       .query("splits")
-      .withIndex("by_friend_settled", (q) =>
-        q.eq("friendId", selfFriend._id).eq("isSettled", false)
-      )
+      .withIndex("by_friend", (q) => q.eq("friendId", selfFriend._id))
       .collect();
 
     let userOwesFriendConverted = 0;
     for (const split of userSplits) {
+      const remaining = getRemainingAmount(split);
+      if (remaining <= 0) continue;
+
       const transaction = await ctx.db.get(split.transactionId);
       if (!transaction) continue;
 
@@ -680,22 +1112,22 @@ export const getBalanceWithFriend = query({
       if (transaction.paidById === args.friendId) {
         const txCurrency = transaction.currency;
         
-        // Track by original currency
+        // Track by original currency (remaining amount)
         if (!balancesByCurrency[txCurrency]) {
           balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
         }
-        balancesByCurrency[txCurrency].userOwes += split.amount;
+        balancesByCurrency[txCurrency].userOwes += remaining;
         
         // Convert to user's currency
         if (transaction.exchangeRates) {
           userOwesFriendConverted += convertAmountHelper(
-            split.amount,
+            remaining,
             txCurrency,
             userCurrency,
             transaction.exchangeRates.rates
           );
         } else {
-          userOwesFriendConverted += split.amount;
+          userOwesFriendConverted += remaining;
         }
       }
     }

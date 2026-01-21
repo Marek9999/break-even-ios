@@ -390,15 +390,25 @@ export const getFriendsWithBalances = query({
 
       // Calculate what friend owes user (friend has unsettled split, user paid)
       // Store both original and converted amounts
+      // Use remaining amount (amount - settledAmount) to support partial settlements
       let friendOwesUserConverted = 0;
       let userOwesFriendConverted = 0;
 
       // Track balances by original currency for detailed breakdown
       const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
 
+      // Helper to get remaining amount from a split (supports partial settlements)
+      const getRemainingAmount = (split: { amount: number; settledAmount?: number }) => {
+        return Math.max(0, split.amount - (split.settledAmount ?? 0));
+      };
+
       for (const split of friendSplits) {
         const transaction = await ctx.db.get(split.transactionId);
         if (!transaction) continue;
+
+        // Get remaining amount (accounting for partial settlements)
+        const remaining = getRemainingAmount(split);
+        if (remaining <= 0) continue;
 
         // Check who paid
         const payer = await ctx.db.get(transaction.paidById);
@@ -412,20 +422,20 @@ export const getFriendsWithBalances = query({
         }
 
         if (payer.isSelf) {
-          // User paid, friend owes user
-          balancesByCurrency[txCurrency].friendOwes += split.amount;
+          // User paid, friend owes user - use REMAINING amount
+          balancesByCurrency[txCurrency].friendOwes += remaining;
           
           // Convert to user's currency using transaction's stored rates
           if (transaction.exchangeRates) {
             friendOwesUserConverted += convertAmount(
-              split.amount,
+              remaining,
               txCurrency,
               userCurrency,
               transaction.exchangeRates.rates
             );
           } else {
             // No exchange rates stored, assume same currency
-            friendOwesUserConverted += split.amount;
+            friendOwesUserConverted += remaining;
           }
         }
       }
@@ -443,6 +453,10 @@ export const getFriendsWithBalances = query({
           const transaction = await ctx.db.get(split.transactionId);
           if (!transaction) continue;
 
+          // Get remaining amount (accounting for partial settlements)
+          const remaining = getRemainingAmount(split);
+          if (remaining <= 0) continue;
+
           // Check if this friend paid
           if (transaction.paidById === friend._id) {
             const txCurrency = transaction.currency;
@@ -452,19 +466,20 @@ export const getFriendsWithBalances = query({
               balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
             }
             
-            balancesByCurrency[txCurrency].userOwes += split.amount;
+            // Use REMAINING amount (accounting for partial settlements)
+            balancesByCurrency[txCurrency].userOwes += remaining;
             
             // Convert to user's currency using transaction's stored rates
             if (transaction.exchangeRates) {
               userOwesFriendConverted += convertAmount(
-                split.amount,
+                remaining,
                 txCurrency,
                 userCurrency,
                 transaction.exchangeRates.rates
               );
             } else {
               // No exchange rates stored, assume same currency
-              userOwesFriendConverted += split.amount;
+              userOwesFriendConverted += remaining;
             }
           }
         }

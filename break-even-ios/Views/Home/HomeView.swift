@@ -8,17 +8,23 @@
 import SwiftUI
 import Clerk
 
+// MARK: - Split Sheet Configuration
+/// Identifiable configuration for presenting NewSplitSheet with optional pre-selected friend
+struct SplitSheetConfig: Identifiable {
+    let id = UUID()
+    let preSelectedFriend: ConvexFriend?
+}
+
 struct HomeView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
     
     @State private var viewModel = HomeViewModel()
-    @State private var showNewSplit = false
+    @State private var splitSheetConfig: SplitSheetConfig?
     @State private var showReceiptCamera = false
     @State private var selectedTab: OwedTab = .owedToYou
     @State private var selectedFriend: FriendWithBalance?
     @State private var receiptScanResult: ReceiptScanResult?
-    @State private var preSelectedFriendForSplit: ConvexFriend?
     
     private var currentTabData: [FriendWithBalance] {
         selectedTab == .owedToYou ? viewModel.owedToMe : viewModel.iOwe
@@ -60,24 +66,13 @@ struct HomeView: View {
         }
         .background(.background)
         .navigationBarHidden(true)
-        .fullScreenCover(isPresented: $showNewSplit) {
-            if let friend = preSelectedFriendForSplit {
-                NewSplitSheet(
-                    preSelectedFriend: friend,
-                    allFriends: viewModel.allFriends,
-                    selfFriend: viewModel.selfFriend,
-                    userDefaultCurrency: viewModel.userCurrency
-                )
-                .onDisappear {
-                    preSelectedFriendForSplit = nil
-                }
-            } else {
-                NewSplitSheet(
-                    allFriends: viewModel.allFriends,
-                    selfFriend: viewModel.selfFriend,
-                    userDefaultCurrency: viewModel.userCurrency
-                )
-            }
+        .fullScreenCover(item: $splitSheetConfig) { config in
+            NewSplitSheet(
+                preSelectedFriend: config.preSelectedFriend,
+                allFriends: viewModel.allFriends,
+                selfFriend: viewModel.selfFriend,
+                userDefaultCurrency: viewModel.userCurrency
+            )
         }
         .fullScreenCover(item: $receiptScanResult) { result in
             // This fullScreenCover is specifically for receipt scan results
@@ -117,9 +112,8 @@ struct HomeView: View {
                 ),
                 onStartSplit: { friend in
                     selectedFriend = nil
-                    preSelectedFriendForSplit = friend
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showNewSplit = true
+                        splitSheetConfig = SplitSheetConfig(preSelectedFriend: friend)
                     }
                 }
             )
@@ -170,7 +164,7 @@ struct HomeView: View {
             HStack(spacing: 8) {
                 // New Split Button
                 Button {
-                    showNewSplit = true
+                    splitSheetConfig = SplitSheetConfig(preSelectedFriend: nil)
                     let generator = UIImpactFeedbackGenerator(style: .medium)
                     generator.impactOccurred()
                 } label: {

@@ -20,11 +20,13 @@ struct PersonDetailSheet: View {
     let onStartSplit: (ConvexFriend) -> Void
     
     @State private var transactions: [EnrichedTransaction] = []
+    @State private var settlements: [EnrichedSettlement] = []
     @State private var scrollOffset: CGFloat = 0
-    @State private var showSettleConfirmation = false
+    @State private var showSettleSheet = false
     @State private var isSettled = false
     @State private var shouldResetSlider = false
     @State private var isLoading = false
+    @State private var showOlderItems = false
     
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
@@ -43,29 +45,93 @@ struct PersonDetailSheet: View {
         balance.userCurrency
     }
     
-    // Filter transactions for this friend
-    private var relevantTransactions: [(transaction: EnrichedTransaction, amount: Double, isOwed: Bool)] {
-        transactions.compactMap { transaction in
-            // Find the friend's split in this transaction
-            guard let friendSplit = transaction.splits.first(where: { $0.friendId == friend.id && !$0.isSettled }) else {
-                return nil
-            }
-            
-            // Check if friend paid or user paid
+    // MARK: - Activity Items (Combined Feed)
+    
+    /// Combined activity feed with transactions and settlements sorted by date descending
+    /// Shows ORIGINAL amounts (not remaining) - settlements in the timeline show balance changes
+    private var activityItems: [ActivityItem] {
+        var items: [ActivityItem] = []
+        
+        // Add transactions - use ORIGINAL amounts, not remaining
+        for transaction in transactions {
             let friendPaid = transaction.paidById == friend.id
+            let userPaid = transaction.payer?.isSelf == true
+            let txCurrency = transaction.currency
+            
+            if userPaid {
+                // User paid - look for friend's split (friend owes user)
+                if let friendSplit = transaction.splits.first(where: { $0.friendId == friend.id }) {
+                    let originalAmount = friendSplit.amount  // Use ORIGINAL amount
+                    items.append(.transaction(transaction, originalAmount: originalAmount, originalCurrency: txCurrency, isOwed: true))
+                }
+            }
             
             if friendPaid {
-                // Friend paid - find user's unsettled split
-                if let userSplit = transaction.splits.first(where: { $0.friend?.isSelf == true && !$0.isSettled }) {
-                    return (transaction, userSplit.amount, false) // User owes friend
+                // Friend paid - look for user's split (user owes friend)
+                if let userSplit = transaction.splits.first(where: { $0.friend?.isSelf == true }) {
+                    let originalAmount = userSplit.amount  // Use ORIGINAL amount
+                    items.append(.transaction(transaction, originalAmount: originalAmount, originalCurrency: txCurrency, isOwed: false))
                 }
-            } else if transaction.payer?.isSelf == true {
-                // User paid - friend owes user
-                return (transaction, friendSplit.amount, true)
             }
-            
-            return nil
-        }.sorted { $0.transaction.date > $1.transaction.date }
+        }
+        
+        // Add settlements
+        for settlement in settlements {
+            items.append(.settlement(settlement))
+        }
+        
+        // Sort by date descending (newest first)
+        return items.sorted { $0.sortTimestamp > $1.sortTimestamp }
+    }
+    
+    /// Find the index of the last full settlement (where all older transactions are settled)
+    private var lastFullSettlementIndex: Int? {
+        // Find the most recent settlement that appears to have cleared everything
+        // (i.e., no unsettled transactions exist before it)
+        for (index, item) in activityItems.enumerated() {
+            if case .settlement = item {
+                // Check if all transactions after this settlement (older in time) are settled
+                let olderTransactions = activityItems.suffix(from: index + 1).compactMap { item -> EnrichedTransaction? in
+                    if case .transaction(let tx, _, _, _) = item { return tx }
+                    return nil
+                }
+                
+                // If all older transactions are fully settled, this was a "full" settlement point
+                let allOlderSettled = olderTransactions.allSatisfy { tx in
+                    let friendSplit = tx.splits.first(where: { $0.friendId == friend.id })
+                    let userSplit = tx.splits.first(where: { $0.friend?.isSelf == true })
+                    let friendRemaining = friendSplit?.remainingAmount ?? 0
+                    let userRemaining = userSplit?.remainingAmount ?? 0
+                    return friendRemaining < 0.01 && userRemaining < 0.01
+                }
+                
+                if allOlderSettled && !olderTransactions.isEmpty {
+                    return index
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Items after the last full settlement (recent activity)
+    private var recentItems: [ActivityItem] {
+        guard let dividerIndex = lastFullSettlementIndex else {
+            // No full settlement found - show all items
+            return activityItems
+        }
+        // Return items before the full settlement index (newer items)
+        return Array(activityItems.prefix(dividerIndex))
+    }
+    
+    /// Items at and before the last full settlement (historical)
+    private var olderItems: [ActivityItem] {
+        guard let dividerIndex = lastFullSettlementIndex else {
+            // No full settlement - no older items to show
+            return []
+        }
+        // Return items from the full settlement index onwards (older items)
+        return Array(activityItems.suffix(from: dividerIndex))
     }
     
     var body: some View {
@@ -94,11 +160,11 @@ struct PersonDetailSheet: View {
                     }
                     .padding(.top, 20)
                     
-                    // Transactions list
-                    if relevantTransactions.isEmpty {
+                    // Activity list
+                    if recentItems.isEmpty && olderItems.isEmpty {
                         emptyState
                     } else {
-                        transactionsList
+                        activityList
                     }
                 }
                 .padding(.horizontal, 20)
@@ -107,7 +173,7 @@ struct PersonDetailSheet: View {
                 if displayAmount > 0 {
                     SlideToConfirmButton(
                         onSlideComplete: {
-                            showSettleConfirmation = true
+                            showSettleSheet = true
                         },
                         isConfirmed: $isSettled,
                         shouldReset: $shouldResetSlider
@@ -116,17 +182,22 @@ struct PersonDetailSheet: View {
                     .padding(.bottom, 0)
                 }
             }
-            .alert(
-                "Settle all \(displayAmount.asCurrency(code: userCurrency)) \(owedToMe ? "from" : "to") \(friend.name)?",
-                isPresented: $showSettleConfirmation
-            ) {
-                Button("Not Yet", role: .cancel) {
+            .sheet(isPresented: $showSettleSheet, onDismiss: {
+                // Reset slider if sheet was dismissed without settling
+                if !isSettled {
                     shouldResetSlider = true
                 }
-                Button("Yup") {
-                    settleAllTransactions()
-                }
-                .keyboardShortcut(.defaultAction)
+            }) {
+                SettleAmountSheet(
+                    maxAmount: displayAmount,
+                    currency: userCurrency,
+                    friendName: friend.name,
+                    isUserPaying: !owedToMe,  // If friend owes me, I'm receiving; if I owe, I'm paying
+                    onSettle: { amount in
+                        try await settleAmount(amount)
+                    }
+                )
+                .presentationDetents([.medium])
             }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.contentOffset.y
@@ -160,33 +231,34 @@ struct PersonDetailSheet: View {
             .animation(.smooth(duration: 0.4), value: transitionProgress > 0.5)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                loadTransactions()
+                loadActivity()
             }
         }
     }
     
-    // MARK: - Load Transactions
+    // MARK: - Load Activity
     
-    private func loadTransactions() {
+    private func loadActivity() {
         guard let clerkId = clerk.user?.id else { return }
         
         Task {
             // Use subscribe + first value pattern since ConvexMobile has no query() method
             let subscription = convexService.client.subscribe(
-                to: "transactions:getTransactionsWithFriend",
+                to: "transactions:getActivityWithFriend",
                 with: [
                     "clerkId": clerkId,
                     "friendId": friend.id
                 ],
-                yielding: [EnrichedTransaction].self
+                yielding: ActivityWithFriendResponse.self
             )
-            .replaceError(with: [])
+            .replaceError(with: ActivityWithFriendResponse(transactions: [], settlements: [], userCurrency: "USD"))
             .values
             
             var iterator = subscription.makeAsyncIterator()
-            if let txs = await iterator.next() {
+            if let response = await iterator.next() {
                 await MainActor.run {
-                    self.transactions = txs
+                    self.transactions = response.transactions
+                    self.settlements = response.settlements
                 }
             }
         }
@@ -213,42 +285,54 @@ struct PersonDetailSheet: View {
         .padding(.vertical, 48)
     }
     
-    // MARK: - Transactions List
+    // MARK: - Activity List
     
-    private var transactionsList: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(relevantTransactions, id: \.transaction.id) { item in
-                HStack(spacing: 10) {
-                    Text(item.transaction.emoji)
-                        .font(Font.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(Color.accent.opacity(0.2)
-                            .cornerRadius(8))
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.transaction.title)
-                            .font(.default)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.text)
-                        Text(item.transaction.dateValue.shortFormatted)
-                            .font(.caption)
-                            .foregroundStyle(.text.opacity(0.6))
+    private var activityList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Recent items (always shown)
+            ForEach(Array(recentItems.enumerated()), id: \.element.id) { index, item in
+                activityRow(for: item)
+                
+                if index < recentItems.count - 1 {
+                    Divider()
+                        .padding(.vertical, 8)
+                }
+            }
+            
+            // Show Older / Hide Older button
+            if !olderItems.isEmpty {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showOlderItems.toggle()
                     }
-                    
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(item.isOwed ? "They owe" : "You owe")
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: showOlderItems ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                        Text(showOlderItems ? "Hide older" : "Show older")
                             .font(.caption)
-                            .foregroundStyle(.text.opacity(0.6))
-                        // Show amount in user's currency (converted on backend)
-                        Text(item.amount.asCurrency(code: userCurrency))
-                            .font(.default)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(item.isOwed ? .accent : .appDestructive)
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                
+                // Older items (conditionally shown)
+                if showOlderItems {
+                    Divider()
+                        .padding(.bottom, 8)
+                    
+                    ForEach(Array(olderItems.enumerated()), id: \.element.id) { index, item in
+                        activityRow(for: item)
+                            .opacity(0.7)  // Slightly dimmed to indicate historical
+                        
+                        if index < olderItems.count - 1 {
+                            Divider()
+                                .padding(.vertical, 8)
+                        }
                     }
                 }
-                Divider()
             }
         }
         .padding()
@@ -257,36 +341,144 @@ struct PersonDetailSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
-    // MARK: - Settle Transactions
+    // MARK: - Activity Row
     
-    private func settleAllTransactions() {
-        guard let clerkId = clerk.user?.id else { return }
+    @ViewBuilder
+    private func activityRow(for item: ActivityItem) -> some View {
+        switch item {
+        case .transaction(let tx, let originalAmount, let originalCurrency, let isOwed):
+            transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
+            
+        case .settlement(let settlement):
+            settlementRow(settlement: settlement)
+        }
+    }
+    
+    private func transactionRow(transaction: EnrichedTransaction, originalAmount: Double, originalCurrency: String, isOwed: Bool) -> some View {
+        let showOriginalCurrency = originalCurrency != userCurrency
         
-        isLoading = true
+        // Convert amount to user currency
+        func convertToUserCurrency(_ amount: Double) -> Double {
+            guard originalCurrency != userCurrency, let rates = transaction.exchangeRates else {
+                return amount
+            }
+            return rates.convert(amount: amount, from: originalCurrency, to: userCurrency)
+        }
         
-        Task {
-            do {
-                let _: Int = try await convexService.client.mutation(
-                    "transactions:settleAllWithFriend",
-                    with: [
-                        "clerkId": clerkId,
-                        "friendId": friend.id
-                    ]
-                )
+        let convertedAmount = convertToUserCurrency(originalAmount)
+        
+        return HStack(spacing: 10) {
+            Text(transaction.emoji)
+                .font(Font.system(size: 16))
+                .frame(width: 36, height: 36)
+                .background(Color.accent.opacity(0.2)
+                    .cornerRadius(8))
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(transaction.title)
+                    .font(.default)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.text)
+                Text(transaction.dateValue.shortFormatted)
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(isOwed ? "They owe" : "You owe")
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
                 
-                await MainActor.run {
-                    isSettled = true
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                        dismiss()
+                // Amount display - show ORIGINAL amount
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    // Show original currency amount if different from user's currency
+                    if showOriginalCurrency {
+                        Text(originalAmount.asCurrency(code: originalCurrency))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.text.opacity(0.5))
                     }
+                    
+                    // Main amount in user's currency
+                    Text(convertedAmount.asCurrency(code: userCurrency))
+                        .font(.default)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(isOwed ? .accent : .appDestructive)
                 }
-            } catch {
-                await MainActor.run {
-                    shouldResetSlider = true
-                    isLoading = false
+            }
+        }
+    }
+    
+    private func settlementRow(settlement: EnrichedSettlement) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.left.arrow.right.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.green)
+                .frame(width: 36, height: 36)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(settlement.isUserPaying ? "You paid" : "Received payment")
+                    .font(.default)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.text)
+                Text(settlement.settledAtDate.shortFormatted)
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 2) {
+                // Amount in user's currency with +/- prefix
+                HStack(spacing: 0) {
+                    Text(settlement.isUserPaying ? "-" : "+")
+                    Text(settlement.formattedConvertedAmount)
                 }
+                .font(.default)
+                .fontWeight(.semibold)
+                .foregroundStyle(settlement.isUserPaying ? Color.appDestructive : Color.green)
+                
+                // Show "out of X" if we have the balance before settlement
+                if let balanceBefore = settlement.formattedConvertedBalanceBefore {
+                    Text("out of \(balanceBefore)")
+                        .font(.caption)
+                        .foregroundStyle(.text.opacity(0.5))
+                }
+            }
+        }
+    }
+    
+    // MARK: - Settle Amount
+    
+    /// Settle a specific amount with the friend (supports partial settlements)
+    private func settleAmount(_ amount: Double) async throws {
+        guard let clerkId = clerk.user?.id else {
+            throw ConvexServiceError.notAuthenticated
+        }
+        
+        // Direction: if friend owes me, they're paying me back ("from_friend")
+        // If I owe them, I'm paying them ("to_friend")
+        let direction = owedToMe ? "from_friend" : "to_friend"
+        
+        let _: SettleAmountResponse = try await convexService.client.mutation(
+            "transactions:settleAmount",
+            with: [
+                "clerkId": clerkId,
+                "friendId": friend.id,
+                "amount": String(amount),
+                "currency": userCurrency,
+                "direction": direction
+            ]
+        )
+        
+        await MainActor.run {
+            isSettled = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                dismiss()
             }
         }
     }

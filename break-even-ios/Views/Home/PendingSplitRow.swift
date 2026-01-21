@@ -199,6 +199,7 @@ struct DetailRow: View {
             transactionId: "tx1",
             friendId: "friend1",
             amount: 50.0,
+            settledAmount: nil,
             percentage: nil,
             isSettled: false,
             settledAt: nil,
