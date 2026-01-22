@@ -27,6 +27,7 @@ struct PersonDetailSheet: View {
     @State private var shouldResetSlider = false
     @State private var isLoading = false
     @State private var showOlderItems = false
+    @Namespace private var olderItemsNamespace
     
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
@@ -331,10 +332,13 @@ struct PersonDetailSheet: View {
             
             // Older chunks (conditionally shown)
             if showOlderItems {
-                ForEach(olderChunks) { chunk in
-                    chunkView(for: chunk)
-                        .opacity(0.7)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(olderChunks) { chunk in
+                        chunkView(for: chunk)
+                            .opacity(0.7)
+                    }
                 }
+                .transition(.offset(y: -20).combined(with: .opacity))
             }
         }
     }
@@ -377,21 +381,24 @@ struct PersonDetailSheet: View {
     
     private var showOlderButton: some View {
         Button(action: {
-            withAnimation(.easeInOut(duration: 0.3)) {
+            withAnimation(.smooth(duration: 0.4)) {
                 showOlderItems.toggle()
             }
         }) {
             HStack(spacing: 4) {
-                Image(systemName: showOlderItems ? "chevron.up" : "chevron.down")
-                    .font(.caption2)
                 Text(showOlderItems ? "Hide older" : "Show older")
-                    .font(.caption)
+                    .font(.subheadline)
+                    .contentTransition(.interpolate)
+                Image(systemName: showOlderItems ? "chevron.up" : "chevron.down")
+                    .font(.subheadline)
+                    .contentTransition(.symbolEffect(.replace.downUp))
             }
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
+        .matchedTransitionSource(id: "olderItemsToggle", in: olderItemsNamespace)
     }
     
     // MARK: - Activity Row
@@ -400,7 +407,12 @@ struct PersonDetailSheet: View {
     private func activityRow(for item: ActivityItem) -> some View {
         switch item {
         case .transaction(let tx, let originalAmount, let originalCurrency, let isOwed):
-            transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
+            NavigationLink {
+                SplitDetailView(transaction: tx, userCurrency: userCurrency)
+            } label: {
+                transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
+            }
+            .buttonStyle(.plain)
             
         case .settlement(let settlement):
             settlementRow(settlement: settlement)
@@ -440,28 +452,32 @@ struct PersonDetailSheet: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 6) {
-                Text(isOwed ? "They owe" : "You owe")
-                    .font(.subheadline)
-                    .foregroundStyle(.text.opacity(0.6))
                 
                 // Amount display - show ORIGINAL amount
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    // Show original currency amount if different from user's currency
-                    if showOriginalCurrency {
-                        Text(originalAmount.asCurrency(code: originalCurrency))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.text.opacity(0.5))
-                    }
                     
                     // Main amount in user's currency
                     Text(convertedAmount.asCurrency(code: userCurrency))
                         .font(.default)
                         .fontWeight(.semibold)
                         .foregroundStyle(isOwed ? .accent : .appDestructive)
+                    
+                    Image(systemName: isOwed ? "arrow.down.left" : "arrow.up.right")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isOwed ? Color.accent : Color.destructive)
+                        .frame(width: 17, height: 17)
+                }
+                
+                // Show original currency amount if different from user's currency
+                if showOriginalCurrency {
+                    Text(originalAmount.asCurrency(code: originalCurrency))
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.text.opacity(0.5))
                 }
             }
         }
+        .contentShape(Rectangle())
     }
     
     private func settlementRow(settlement: EnrichedSettlement) -> some View {
@@ -487,36 +503,6 @@ struct PersonDetailSheet: View {
                 .font(.subheadline)
                 .foregroundStyle(.text.opacity(0.6))
             
-            
-//            VStack(alignment: .leading, spacing: 4) {
-//                Text(settlement.isUserPaying ? "You paid" : "You got")
-//                    .font(.default)
-//                    .fontWeight(.medium)
-//                    .foregroundStyle(.text)
-//                Text(settlement.settledAtDate.smartFormatted)
-//                    .font(.caption)
-//                    .foregroundStyle(.text.opacity(0.6))
-//            }
-//            
-//            Spacer()
-//            
-//            VStack(alignment: .trailing, spacing: 2) {
-//                // Amount in user's currency with +/- prefix
-//                HStack(spacing: 0) {
-//                    Text(settlement.isUserPaying ? "-" : "+")
-//                    Text(settlement.formattedConvertedAmount)
-//                }
-//                .font(.default)
-//                .fontWeight(.semibold)
-//                .foregroundStyle(settlement.isUserPaying ? Color.appDestructive : Color.green)
-//                
-//                // Show "out of X" if we have the balance before settlement
-//                if let balanceBefore = settlement.formattedConvertedBalanceBefore {
-//                    Text("out of \(balanceBefore)")
-//                        .font(.caption)
-//                        .foregroundStyle(.text.opacity(0.5))
-//                }
-//            }
         }
     }
     
@@ -991,6 +977,7 @@ private struct PersonDetailSheetPreviewContent: View {
     @State private var isSettled = false
     @State private var shouldResetSlider = false
     @State private var showOlderItems = false
+    @Namespace private var olderItemsNamespace
     
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
@@ -1216,10 +1203,13 @@ private struct PersonDetailSheetPreviewContent: View {
             }
             
             if showOlderItems {
-                ForEach(olderChunks) { chunk in
-                    chunkView(for: chunk)
-                        .opacity(0.7)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(olderChunks) { chunk in
+                        chunkView(for: chunk)
+                            .opacity(0.7)
+                    }
                 }
+                .transition(.offset(y: -30).combined(with: .opacity))
             }
         }
     }
@@ -1256,28 +1246,36 @@ private struct PersonDetailSheetPreviewContent: View {
     
     private var showOlderButton: some View {
         Button(action: {
-            withAnimation(.easeInOut(duration: 0.3)) {
+            withAnimation(.smooth(duration: 0.4)) {
                 showOlderItems.toggle()
             }
         }) {
             HStack(spacing: 4) {
-                Image(systemName: showOlderItems ? "chevron.up" : "chevron.down")
-                    .font(.caption2)
                 Text(showOlderItems ? "Hide older" : "Show older")
-                    .font(.caption)
+                    .font(.subheadline)
+                    .contentTransition(.interpolate)
+                Image(systemName: showOlderItems ? "chevron.up" : "chevron.down")
+                    .font(.subheadline)
+                    .contentTransition(.symbolEffect(.replace.downUp))
             }
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
+        .matchedTransitionSource(id: "olderItemsToggle", in: olderItemsNamespace)
     }
     
     @ViewBuilder
     private func activityRow(for item: ActivityItem) -> some View {
         switch item {
         case .transaction(let tx, let originalAmount, let originalCurrency, let isOwed):
-            transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
+            NavigationLink {
+                SplitDetailView(transaction: tx, userCurrency: userCurrency)
+            } label: {
+                transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
+            }
+            .buttonStyle(.plain)
         case .settlement(let settlement):
             settlementRow(settlement: settlement)
         }
@@ -1315,25 +1313,31 @@ private struct PersonDetailSheetPreviewContent: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
-                Text(isOwed ? "They owe" : "You owe")
-                    .font(.subheadline)
-                    .foregroundStyle(.text.opacity(0.6))
+//                Text(isOwed ? "They owe" : "You owe")
+//                    .font(.subheadline)
+//                    .foregroundStyle(.text.opacity(0.6))
                 
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    if showOriginalCurrency {
-                        Text(originalAmount.asCurrency(code: originalCurrency))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.text.opacity(0.5))
-                    }
-                    
+                    Image(systemName: isOwed ? "arrow.up.right" : "arrow.down.left")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isOwed ? Color.destructive : Color.accent)
+                        .frame(width: 17, height: 17)
+                        
                     Text(convertedAmount.asCurrency(code: userCurrency))
                         .font(.default)
                         .fontWeight(.semibold)
                         .foregroundStyle(isOwed ? .accent : .appDestructive)
                 }
+                
+                if showOriginalCurrency {
+                    Text(originalAmount.asCurrency(code: originalCurrency))
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.text.opacity(0.5))
+                }
             }
         }
+        .contentShape(Rectangle())
     }
     
     private func settlementRow(settlement: EnrichedSettlement) -> some View {
