@@ -43,6 +43,18 @@ extension Date {
         return formatter.string(from: self)
     }
     
+    /// Smart date format: "Jan 5" for current year, "Jan 5, 2025" for other years
+    var smartFormatted: String {
+        let dateYear = Calendar.current.component(.year, from: self)
+        let currentYear = Calendar.current.component(.year, from: Date())
+        
+        if dateYear == currentYear {
+            return self.formatted(.dateTime.month(.abbreviated).day())
+        } else {
+            return self.formatted(.dateTime.month(.abbreviated).day().year())
+        }
+    }
+    
     var fullFormatted: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .long
@@ -60,15 +72,15 @@ extension Double {
     }
     
     /// Format as currency using a specific currency code
+    /// Uses custom symbols: $ (USD), € (EUR), £ (GBP), C$ (CAD), A$ (AUD), ₹ (INR), ¥ (JPY)
     func asCurrency(code: String) -> String {
+        let symbol = currencySymbol(for: code)
         let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = code
-        // Handle Japanese Yen which doesn't use decimal places
-        if code == "JPY" {
-            formatter.maximumFractionDigits = 0
-        }
-        return formatter.string(from: NSNumber(value: self)) ?? "\(currencySymbol(for: code))\(self)"
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = (code == "JPY") ? 0 : 2
+        formatter.maximumFractionDigits = (code == "JPY") ? 0 : 2
+        let formattedNumber = formatter.string(from: NSNumber(value: self)) ?? String(format: code == "JPY" ? "%.0f" : "%.2f", self)
+        return "\(symbol)\(formattedNumber)"
     }
     
     /// Compact currency format for pills (e.g., "$21.5" instead of "$21.50")
@@ -76,13 +88,13 @@ extension Double {
         asCompactCurrency(code: Configuration.defaultCurrency)
     }
     
-    /// Compact currency format with specific currency code
+    /// Compact currency format with specific currency code (e.g., "$21.5" instead of "$21.50")
+    /// Uses custom symbols: $ (USD), € (EUR), £ (GBP), C$ (CAD), A$ (AUD), ₹ (INR), ¥ (JPY)
     func asCompactCurrency(code: String) -> String {
+        let symbol = currencySymbol(for: code)
         let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = code
+        formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 2
         
         // Handle Japanese Yen which doesn't use decimal places
         if code == "JPY" {
@@ -93,9 +105,12 @@ extension Double {
                 formatter.maximumFractionDigits = 0
             } else if (self * 10) == floor(self * 10) {
                 formatter.maximumFractionDigits = 1
+            } else {
+                formatter.maximumFractionDigits = 2
             }
         }
-        return formatter.string(from: NSNumber(value: self)) ?? "\(currencySymbol(for: code))\(self)"
+        let formattedNumber = formatter.string(from: NSNumber(value: self)) ?? String(format: "%.2f", self)
+        return "\(symbol)\(formattedNumber)"
     }
     
     var asPercentage: String {

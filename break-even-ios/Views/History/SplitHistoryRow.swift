@@ -36,7 +36,7 @@ struct SplitHistoryRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     
-                    Text(transaction.dateValue.shortFormatted)
+                    Text(transaction.dateValue.smartFormatted)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -44,53 +44,16 @@ struct SplitHistoryRow: View {
             
             Spacer()
             
-            // Amount and Status
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(transaction.formattedAmount)
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
-                
-                StatusBadge(status: transaction.status)
-            }
+            // Amount
+            Text(transaction.formattedAmount)
+                .font(.body)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(Color.secondary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-// MARK: - Status Badge
-
-struct StatusBadge: View {
-    let status: String
-    
-    private var displayText: String {
-        switch status {
-        case "settled": return "Settled"
-        case "partial": return "Partial"
-        default: return "Pending"
-        }
-    }
-    
-    private var backgroundColor: Color {
-        switch status {
-        case "settled": return .green
-        case "partial": return .orange
-        default: return .secondary
-        }
-    }
-    
-    var body: some View {
-        Text(displayText)
-            .font(.caption2)
-            .fontWeight(.medium)
-            .foregroundStyle(backgroundColor)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(backgroundColor.opacity(0.15))
-            .clipShape(Capsule())
     }
 }
 
@@ -107,7 +70,6 @@ struct StatusBadge: View {
                 totalAmount: 156.80,
                 currency: "USD",
                 splitMethod: "equal",
-                status: "pending",
                 receiptFileId: nil,
                 items: nil,
                 exchangeRates: nil,

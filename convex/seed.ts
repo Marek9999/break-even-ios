@@ -135,7 +135,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 120.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 2 * 24 * 60 * 60 * 1000,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
@@ -146,25 +145,18 @@ export const seedForCurrentUser = mutation({
       transactionId: tx1Id,
       friendId: selfFriend!._id,
       amount: 40.00,
-      settledAmount: 40.00,  // Payer's share is fully settled
-      isSettled: true,
-      settledAt: now - 2 * 24 * 60 * 60 * 1000,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx1Id,
       friendId: bobId,
       amount: 40.00,
-      settledAmount: 0,  // Not settled at all
-      isSettled: false,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx1Id,
       friendId: charlieId,
       amount: 40.00,
-      settledAmount: 0,  // Not settled at all
-      isSettled: false,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
 
@@ -177,7 +169,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 78.00, // €78 EUR
       currency: "EUR",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
@@ -188,17 +179,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx2Id,
       friendId: selfFriend!._id,
       amount: 39.00, // €39 EUR
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx2Id,
       friendId: bobId,
       amount: 39.00,
-      settledAmount: 39.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
 
@@ -212,7 +198,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 36.00, // £36 GBP
       currency: "GBP",
       splitMethod: "equal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 10 * 24 * 60 * 60 * 1000,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
@@ -223,28 +208,18 @@ export const seedForCurrentUser = mutation({
       transactionId: tx3Id,
       friendId: selfFriend!._id,
       amount: 12.00, // £12 GBP
-      settledAmount: 12.00,
-      isSettled: true,
-      settledAt: now - 8 * 24 * 60 * 60 * 1000,
-      settledById: currentUser._id,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx3Id,
       friendId: bobId,
       amount: 12.00,
-      settledAmount: 12.00,
-      isSettled: true,
-      settledAt: now - 9 * 24 * 60 * 60 * 1000,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx3Id,
       friendId: charlieId,
       amount: 12.00,
-      settledAmount: 12.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 10 * 24 * 60 * 60 * 1000,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
 
@@ -257,7 +232,6 @@ export const seedForCurrentUser = mutation({
       direction: "to_friend",  // User paid Charlie
       balanceBeforeSettlement: 12.00,  // User owed £12 before paying
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: "[]",
       settledAt: now - 8 * 24 * 60 * 60 * 1000,
       createdAt: now - 8 * 24 * 60 * 60 * 1000,
     });
@@ -272,7 +246,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 1500.00,
       currency: "USD",
       splitMethod: "byParts",
-      status: "partial",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 1 * 24 * 60 * 60 * 1000,
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
@@ -283,19 +256,14 @@ export const seedForCurrentUser = mutation({
       transactionId: tx4Id,
       friendId: selfFriend!._id,
       amount: 750.00,
-      settledAmount: 750.00,  // Payer's share
       percentage: 50,
-      isSettled: true,
-      settledAt: now - 1 * 24 * 60 * 60 * 1000,
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx4Id,
       friendId: dianaId,
       amount: 750.00,
-      settledAmount: 0,
       percentage: 50,
-      isSettled: false,
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
     });
 
@@ -309,7 +277,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 8970.00, // ¥8970 JPY (~$60 USD)
       currency: "JPY",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 3 * 24 * 60 * 60 * 1000,
       createdAt: now - 3 * 24 * 60 * 60 * 1000,
@@ -320,17 +287,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx5Id,
       friendId: selfFriend!._id,
       amount: 4485.00,
-      settledAmount: 4485.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 3 * 24 * 60 * 60 * 1000,
       createdAt: now - 3 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx5Id,
       friendId: charlieId,
       amount: 4485.00, // ~$30 USD
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 3 * 24 * 60 * 60 * 1000,
     });
 
@@ -344,7 +306,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 830.00, // ₹830 INR (~$10 USD)
       currency: "INR",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 4 * 24 * 60 * 60 * 1000,
       createdAt: now - 4 * 24 * 60 * 60 * 1000,
@@ -355,17 +316,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx6Id,
       friendId: selfFriend!._id,
       amount: 415.00, // ~$5 USD
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 4 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx6Id,
       friendId: dianaId,
       amount: 415.00,
-      settledAmount: 415.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 4 * 24 * 60 * 60 * 1000,
       createdAt: now - 4 * 24 * 60 * 60 * 1000,
     });
 
@@ -383,7 +339,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 300.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 30 * 24 * 60 * 60 * 1000,
       createdAt: now - 30 * 24 * 60 * 60 * 1000,
@@ -394,19 +349,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx7Id,
       friendId: selfFriend!._id,
       amount: 150.00,
-      settledAmount: 150.00,
-      isSettled: true,
-      settledAt: now - 30 * 24 * 60 * 60 * 1000,
       createdAt: now - 30 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx7Id,
       friendId: eveId,
       amount: 150.00,
-      settledAmount: 150.00,  // Eve fully settled
-      isSettled: true,
-      settledAt: now - 25 * 24 * 60 * 60 * 1000,
-      settledById: currentUser._id,
       createdAt: now - 30 * 24 * 60 * 60 * 1000,
     });
 
@@ -420,7 +368,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 80.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 15 * 24 * 60 * 60 * 1000,
       createdAt: now - 15 * 24 * 60 * 60 * 1000,
@@ -431,19 +378,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx8Id,
       friendId: selfFriend!._id,
       amount: 40.00,
-      settledAmount: 40.00,  // You settled your share
-      isSettled: true,
-      settledAt: now - 14 * 24 * 60 * 60 * 1000,
-      settledById: currentUser._id,
       createdAt: now - 15 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx8Id,
       friendId: eveId,
       amount: 40.00,
-      settledAmount: 40.00,  // Eve paid
-      isSettled: true,
-      settledAt: now - 15 * 24 * 60 * 60 * 1000,
       createdAt: now - 15 * 24 * 60 * 60 * 1000,
     });
 
@@ -456,7 +396,6 @@ export const seedForCurrentUser = mutation({
       direction: "to_friend",  // User paid Eve
       balanceBeforeSettlement: 40.00,  // User owed $40 for brunch
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: "[]",  // Simplified for seed
       settledAt: now - 14 * 24 * 60 * 60 * 1000,
       createdAt: now - 14 * 24 * 60 * 60 * 1000,
     });
@@ -470,7 +409,6 @@ export const seedForCurrentUser = mutation({
       direction: "from_friend",  // Eve paid user
       balanceBeforeSettlement: 150.00,  // Eve owed $150 for concert
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: "[]",
       settledAt: now - 25 * 24 * 60 * 60 * 1000,
       createdAt: now - 25 * 24 * 60 * 60 * 1000,
     });
@@ -489,7 +427,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 200.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "partial",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 7 * 24 * 60 * 60 * 1000,
       createdAt: now - 7 * 24 * 60 * 60 * 1000,
@@ -500,17 +437,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx9Id,
       friendId: selfFriend!._id,
       amount: 100.00,
-      settledAmount: 100.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 7 * 24 * 60 * 60 * 1000,
       createdAt: now - 7 * 24 * 60 * 60 * 1000,
     });
     const frankSplit1Id = await ctx.db.insert("splits", {
       transactionId: tx9Id,
       friendId: frankId,
       amount: 100.00,
-      settledAmount: 60.00,  // PARTIAL: Frank paid $60 of $100
-      isSettled: false,  // Not fully settled
       createdAt: now - 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -524,7 +456,6 @@ export const seedForCurrentUser = mutation({
       note: "First partial payment",
       balanceBeforeSettlement: 100.00,  // Frank owed $100 before this payment
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: JSON.stringify([{ splitId: frankSplit1Id, amountApplied: 60.00 }]),
       settledAt: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
@@ -539,7 +470,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 80.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "partial",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 6 * 24 * 60 * 60 * 1000,
       createdAt: now - 6 * 24 * 60 * 60 * 1000,
@@ -550,17 +480,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx10Id,
       friendId: selfFriend!._id,
       amount: 40.00,
-      settledAmount: 25.00,  // PARTIAL: User paid $25 of $40
-      isSettled: false,  // Not fully settled
       createdAt: now - 6 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx10Id,
       friendId: frankId,
       amount: 40.00,
-      settledAmount: 40.00,  // Frank paid (payer's share)
-      isSettled: true,
-      settledAt: now - 6 * 24 * 60 * 60 * 1000,
       createdAt: now - 6 * 24 * 60 * 60 * 1000,
     });
 
@@ -574,7 +499,6 @@ export const seedForCurrentUser = mutation({
       note: "Partial payment for gas",
       balanceBeforeSettlement: 40.00,  // User owed $40 before this payment
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: JSON.stringify([{ splitId: userSplitFrankId, amountApplied: 25.00 }]),
       settledAt: now - 4 * 24 * 60 * 60 * 1000,
       createdAt: now - 4 * 24 * 60 * 60 * 1000,
     });
@@ -589,7 +513,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 92.00, // €92 EUR
       currency: "EUR",
       splitMethod: "equal",
-      status: "partial",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 12 * 24 * 60 * 60 * 1000,
       createdAt: now - 12 * 24 * 60 * 60 * 1000,
@@ -600,17 +523,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx11Id,
       friendId: selfFriend!._id,
       amount: 46.00,
-      settledAmount: 46.00,  // Payer's share
-      isSettled: true,
-      settledAt: now - 12 * 24 * 60 * 60 * 1000,
       createdAt: now - 12 * 24 * 60 * 60 * 1000,
     });
     const frankSplit2Id = await ctx.db.insert("splits", {
       transactionId: tx11Id,
       friendId: frankId,
       amount: 46.00,
-      settledAmount: 20.00,  // PARTIAL: Frank paid €20 of €46
-      isSettled: false,
       createdAt: now - 12 * 24 * 60 * 60 * 1000,
     });
 
@@ -624,7 +542,6 @@ export const seedForCurrentUser = mutation({
       note: "Partial payment in EUR",
       balanceBeforeSettlement: 46.00,  // Frank owed €46 before this payment
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: JSON.stringify([{ splitId: frankSplit2Id, amountApplied: 20.00 }]),
       settledAt: now - 10 * 24 * 60 * 60 * 1000,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
@@ -654,7 +571,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 60.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 60 * 24 * 60 * 60 * 1000,
       createdAt: now - 60 * 24 * 60 * 60 * 1000,
@@ -664,19 +580,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx12Id,
       friendId: selfFriend!._id,
       amount: 30.00,
-      settledAmount: 30.00,
-      isSettled: true,
-      settledAt: now - 60 * 24 * 60 * 60 * 1000,
       createdAt: now - 60 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx12Id,
       friendId: graceId,
       amount: 30.00,
-      settledAmount: 30.00,  // Fully settled via settle-all
-      isSettled: true,
-      settledAt: now - 45 * 24 * 60 * 60 * 1000,  // Settled 45 days ago
-      settledById: currentUser._id,
       createdAt: now - 60 * 24 * 60 * 60 * 1000,
     });
 
@@ -690,7 +599,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 20.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 55 * 24 * 60 * 60 * 1000,
       createdAt: now - 55 * 24 * 60 * 60 * 1000,
@@ -700,19 +608,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx13Id,
       friendId: selfFriend!._id,
       amount: 10.00,
-      settledAmount: 10.00,  // Fully settled via settle-all
-      isSettled: true,
-      settledAt: now - 45 * 24 * 60 * 60 * 1000,
-      settledById: currentUser._id,
       createdAt: now - 55 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx13Id,
       friendId: graceId,
       amount: 10.00,
-      settledAmount: 10.00,
-      isSettled: true,
-      settledAt: now - 55 * 24 * 60 * 60 * 1000,
       createdAt: now - 55 * 24 * 60 * 60 * 1000,
     });
 
@@ -727,7 +628,6 @@ export const seedForCurrentUser = mutation({
       note: "Settled all",
       balanceBeforeSettlement: 20.00,  // Net balance was $20 (Grace owed)
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: "[]",
       settledAt: now - 45 * 24 * 60 * 60 * 1000,
       createdAt: now - 45 * 24 * 60 * 60 * 1000,
     });
@@ -742,7 +642,7 @@ export const seedForCurrentUser = mutation({
       totalAmount: 100.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "partial",  // Partial because Grace paid $20 of $50
+  // Partial because Grace paid $20 of $50
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
@@ -752,17 +652,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx14Id,
       friendId: selfFriend!._id,
       amount: 50.00,
-      settledAmount: 50.00,
-      isSettled: true,
-      settledAt: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
     const graceSplit1Id = await ctx.db.insert("splits", {
       transactionId: tx14Id,
       friendId: graceId,
       amount: 50.00,
-      settledAmount: 20.00,  // Grace paid $20 of $50 (partial)
-      isSettled: false,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
 
@@ -776,7 +671,6 @@ export const seedForCurrentUser = mutation({
       note: "Partial payment for sushi",
       balanceBeforeSettlement: 50.00,  // Grace owed $50 before this payment
       exchangeRates: SEED_EXCHANGE_RATES,
-      affectedSplitsJson: JSON.stringify([{ splitId: graceSplit1Id, amountApplied: 20.00 }]),
       settledAt: now - 3 * 24 * 60 * 60 * 1000,
       createdAt: now - 3 * 24 * 60 * 60 * 1000,
     });
@@ -791,7 +685,6 @@ export const seedForCurrentUser = mutation({
       totalAmount: 40.00,
       currency: "USD",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 2 * 24 * 60 * 60 * 1000,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
@@ -801,17 +694,12 @@ export const seedForCurrentUser = mutation({
       transactionId: tx15Id,
       friendId: selfFriend!._id,
       amount: 20.00,
-      settledAmount: 0,  // Not settled yet
-      isSettled: false,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
     await ctx.db.insert("splits", {
       transactionId: tx15Id,
       friendId: graceId,
       amount: 20.00,
-      settledAmount: 20.00,
-      isSettled: true,
-      settledAt: now - 2 * 24 * 60 * 60 * 1000,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
 
@@ -977,7 +865,6 @@ export const seedDatabase = mutation({
       totalAmount: 120.50,
       currency: "USD",
       splitMethod: "equal",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 2 * 24 * 60 * 60 * 1000, // 2 days ago
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
@@ -992,7 +879,6 @@ export const seedDatabase = mutation({
       totalAmount: 78.89, // EUR
       currency: "EUR",
       splitMethod: "byItem",
-      status: "pending",
       exchangeRates: SEED_EXCHANGE_RATES,
       items: [
         {
@@ -1031,7 +917,6 @@ export const seedDatabase = mutation({
       totalAmount: 35.55, // GBP
       currency: "GBP",
       splitMethod: "unequal",
-      status: "settled",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 10 * 24 * 60 * 60 * 1000, // 10 days ago
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
@@ -1047,7 +932,6 @@ export const seedDatabase = mutation({
       totalAmount: 2400.00,
       currency: "USD",
       splitMethod: "byParts",
-      status: "partial",
       exchangeRates: SEED_EXCHANGE_RATES,
       date: now - 1 * 24 * 60 * 60 * 1000, // 1 day ago
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
@@ -1064,9 +948,6 @@ export const seedDatabase = mutation({
       transactionId: transaction1Id,
       friendId: aliceSelfId,
       amount: perPersonDinner,
-      settledAmount: perPersonDinner,  // Payer's share fully settled
-      isSettled: true, // Alice paid, so her part is settled
-      settledAt: now - 2 * 24 * 60 * 60 * 1000,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
 
@@ -1074,8 +955,6 @@ export const seedDatabase = mutation({
       transactionId: transaction1Id,
       friendId: aliceFriendBobId,
       amount: perPersonDinner,
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
 
@@ -1083,8 +962,6 @@ export const seedDatabase = mutation({
       transactionId: transaction1Id,
       friendId: aliceFriendCharlieId,
       amount: perPersonDinner,
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 2 * 24 * 60 * 60 * 1000,
     });
 
@@ -1093,8 +970,6 @@ export const seedDatabase = mutation({
       transactionId: transaction2Id,
       friendId: aliceSelfId,
       amount: 22.625, // Half of milk+eggs (7.625) + third of household (15)
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
 
@@ -1102,9 +977,6 @@ export const seedDatabase = mutation({
       transactionId: transaction2Id,
       friendId: aliceFriendBobId,
       amount: 48.125, // Half of milk+eggs (7.625) + snacks (25.50) + third of household (15)
-      settledAmount: 48.125,  // Payer's share fully settled
-      isSettled: true, // Bob paid, his part is settled
-      settledAt: now - 5 * 24 * 60 * 60 * 1000,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
 
@@ -1112,8 +984,6 @@ export const seedDatabase = mutation({
       transactionId: transaction2Id,
       friendId: aliceFriendCharlieId,
       amount: 15.00, // Third of household items
-      settledAmount: 0,
-      isSettled: false,
       createdAt: now - 5 * 24 * 60 * 60 * 1000,
     });
 
@@ -1122,10 +992,6 @@ export const seedDatabase = mutation({
       transactionId: transaction3Id,
       friendId: aliceSelfId,
       amount: 15.00,
-      settledAmount: 15.00,
-      isSettled: true,
-      settledAt: now - 8 * 24 * 60 * 60 * 1000,
-      settledById: user1Id,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
 
@@ -1133,10 +999,6 @@ export const seedDatabase = mutation({
       transactionId: transaction3Id,
       friendId: aliceFriendBobId,
       amount: 15.00,
-      settledAmount: 15.00,
-      isSettled: true,
-      settledAt: now - 9 * 24 * 60 * 60 * 1000,
-      settledById: user2Id,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
 
@@ -1144,9 +1006,6 @@ export const seedDatabase = mutation({
       transactionId: transaction3Id,
       friendId: aliceFriendCharlieId,
       amount: 15.00,
-      settledAmount: 15.00,  // Payer's share
-      isSettled: true, // Charlie paid
-      settledAt: now - 10 * 24 * 60 * 60 * 1000,
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
 
@@ -1155,10 +1014,7 @@ export const seedDatabase = mutation({
       transactionId: transaction4Id,
       friendId: aliceSelfId,
       amount: 1200.00, // 2/4 parts
-      settledAmount: 1200.00,  // Payer's share
       percentage: 50,
-      isSettled: true, // Alice paid
-      settledAt: now - 1 * 24 * 60 * 60 * 1000,
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
     });
 
@@ -1166,11 +1022,7 @@ export const seedDatabase = mutation({
       transactionId: transaction4Id,
       friendId: aliceFriendBobId,
       amount: 600.00, // 1/4 parts
-      settledAmount: 600.00,
       percentage: 25,
-      isSettled: true,
-      settledAt: now,
-      settledById: user2Id,
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
     });
 
@@ -1178,9 +1030,7 @@ export const seedDatabase = mutation({
       transactionId: transaction4Id,
       friendId: aliceFriendDianaId,
       amount: 600.00, // 1/4 parts
-      settledAmount: 0,
       percentage: 25,
-      isSettled: false, // Diana hasn't paid yet
       createdAt: now - 1 * 24 * 60 * 60 * 1000,
     });
 
@@ -1359,3 +1209,4 @@ export const clearUserData = mutation({
     };
   },
 });
+

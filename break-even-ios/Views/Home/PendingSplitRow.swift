@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import Clerk
-import ConvexMobile
 
 struct PendingSplitRow: View {
     let split: EnrichedSplit
@@ -67,13 +65,9 @@ struct PendingSplitRow: View {
 
 struct SplitDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.clerk) private var clerk
-    @Environment(\.convexService) private var convexService
     
     let split: EnrichedSplit
     let transaction: EnrichedTransaction
-    
-    @State private var isSettling = false
     
     var body: some View {
         NavigationStack {
@@ -101,8 +95,7 @@ struct SplitDetailSheet: View {
                     VStack(alignment: .leading, spacing: 16) {
                         DetailRow(label: "Transaction", value: transaction.title)
                         DetailRow(label: "Paid by", value: transaction.payerName)
-                        DetailRow(label: "Date", value: transaction.dateValue.shortFormatted)
-                        DetailRow(label: "Status", value: split.isSettled ? "Settled" : "Pending")
+                        DetailRow(label: "Date", value: transaction.dateValue.smartFormatted)
                         
                         if let percentage = split.percentage {
                             DetailRow(label: "Your Share", value: percentage.asPercentage)
@@ -111,28 +104,6 @@ struct SplitDetailSheet: View {
                     .padding()
                     .background(Color(.systemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    
-                    // Settle Button
-                    if !split.isSettled {
-                        Button {
-                            settle()
-                        } label: {
-                            if isSettling {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                            } else {
-                                Text("Mark as Settled")
-                                    .fontWeight(.semibold)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                            }
-                        }
-                        .background(Color.green)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .disabled(isSettling)
-                    }
                 }
                 .padding()
             }
@@ -144,33 +115,6 @@ struct SplitDetailSheet: View {
                     Button("Close") {
                         dismiss()
                     }
-                }
-            }
-        }
-    }
-    
-    private func settle() {
-        guard let clerkId = clerk.user?.id else { return }
-        
-        isSettling = true
-        
-        Task {
-            do {
-                let _: String = try await convexService.client.mutation(
-                    "transactions:settleSplit",
-                    with: [
-                        "clerkId": clerkId,
-                        "splitId": split._id
-                    ]
-                )
-                
-                await MainActor.run {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isSettling = false
                 }
             }
         }
@@ -199,11 +143,7 @@ struct DetailRow: View {
             transactionId: "tx1",
             friendId: "friend1",
             amount: 50.0,
-            settledAmount: nil,
             percentage: nil,
-            isSettled: false,
-            settledAt: nil,
-            settledById: nil,
             createdAt: Date().timeIntervalSince1970 * 1000,
             friend: nil
         ),
@@ -217,7 +157,6 @@ struct DetailRow: View {
             totalAmount: 100.0,
             currency: "USD",
             splitMethod: "equal",
-            status: "pending",
             receiptFileId: nil,
             items: nil,
             exchangeRates: nil,

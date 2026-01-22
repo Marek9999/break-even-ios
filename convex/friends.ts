@@ -216,16 +216,14 @@ export const deleteFriend = mutation({
       throw new Error("Cannot delete self");
     }
 
-    // Check if there are any unsettled splits with this friend
-    const unsettledSplits = await ctx.db
+    // Check if there are any splits with this friend (can't delete if there's history)
+    const friendSplits = await ctx.db
       .query("splits")
-      .withIndex("by_friend_settled", (q) =>
-        q.eq("friendId", args.friendId).eq("isSettled", false)
-      )
+      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
       .collect();
 
-    if (unsettledSplits.length > 0) {
-      throw new Error("Cannot delete friend with unsettled splits");
+    if (friendSplits.length > 0) {
+      throw new Error("Cannot delete friend with transaction history");
     }
 
     // Delete all pending invitations for this friend
@@ -348,7 +346,8 @@ function convertAmount(
 
 /**
  * Get friends who have pending balances with the user
- * Balances are converted to user's default currency using stored exchange rates
+ * Balance = (friend's splits where user paid) - (settlements FROM friend) 
+ *         - (user's splits where friend paid) + (settlements TO friend)
  */
 export const getFriendsWithBalances = query({
   args: {
@@ -380,35 +379,20 @@ export const getFriendsWithBalances = query({
     for (const friend of friends) {
       if (friend.isSelf) continue;
 
-      // Get all unsettled splits for this friend
-      const friendSplits = await ctx.db
-        .query("splits")
-        .withIndex("by_friend_settled", (q) =>
-          q.eq("friendId", friend._id).eq("isSettled", false)
-        )
-        .collect();
-
-      // Calculate what friend owes user (friend has unsettled split, user paid)
-      // Store both original and converted amounts
-      // Use remaining amount (amount - settledAmount) to support partial settlements
+      // Track balances by original currency for detailed breakdown
+      const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
       let friendOwesUserConverted = 0;
       let userOwesFriendConverted = 0;
 
-      // Track balances by original currency for detailed breakdown
-      const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
-
-      // Helper to get remaining amount from a split (supports partial settlements)
-      const getRemainingAmount = (split: { amount: number; settledAmount?: number }) => {
-        return Math.max(0, split.amount - (split.settledAmount ?? 0));
-      };
+      // 1. Get all splits for this friend (what friend owes from transactions where user paid)
+      const friendSplits = await ctx.db
+        .query("splits")
+        .withIndex("by_friend", (q) => q.eq("friendId", friend._id))
+        .collect();
 
       for (const split of friendSplits) {
         const transaction = await ctx.db.get(split.transactionId);
         if (!transaction) continue;
-
-        // Get remaining amount (accounting for partial settlements)
-        const remaining = getRemainingAmount(split);
-        if (remaining <= 0) continue;
 
         // Check who paid
         const payer = await ctx.db.get(transaction.paidById);
@@ -416,85 +400,108 @@ export const getFriendsWithBalances = query({
 
         const txCurrency = transaction.currency;
         
-        // Initialize currency entry if not exists
-        if (!balancesByCurrency[txCurrency]) {
-          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
-        }
-
         if (payer.isSelf) {
-          // User paid, friend owes user - use REMAINING amount
-          balancesByCurrency[txCurrency].friendOwes += remaining;
+          // User paid, friend owes user
+          if (!balancesByCurrency[txCurrency]) {
+            balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+          }
+          balancesByCurrency[txCurrency].friendOwes += split.amount;
           
-          // Convert to user's currency using transaction's stored rates
+          // Convert to user's currency
           if (transaction.exchangeRates) {
             friendOwesUserConverted += convertAmount(
-              remaining,
+              split.amount,
               txCurrency,
               userCurrency,
               transaction.exchangeRates.rates
             );
           } else {
-            // No exchange rates stored, assume same currency
-            friendOwesUserConverted += remaining;
+            friendOwesUserConverted += split.amount;
           }
         }
       }
 
-      // Get splits where the friend paid but user owes
+      // 2. Get splits where the user owes (user's splits where friend paid)
       if (selfFriend) {
         const userSplits = await ctx.db
           .query("splits")
-          .withIndex("by_friend_settled", (q) =>
-            q.eq("friendId", selfFriend._id).eq("isSettled", false)
-          )
+          .withIndex("by_friend", (q) => q.eq("friendId", selfFriend._id))
           .collect();
 
         for (const split of userSplits) {
           const transaction = await ctx.db.get(split.transactionId);
           if (!transaction) continue;
 
-          // Get remaining amount (accounting for partial settlements)
-          const remaining = getRemainingAmount(split);
-          if (remaining <= 0) continue;
-
           // Check if this friend paid
           if (transaction.paidById === friend._id) {
             const txCurrency = transaction.currency;
             
-            // Initialize currency entry if not exists
             if (!balancesByCurrency[txCurrency]) {
               balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
             }
+            balancesByCurrency[txCurrency].userOwes += split.amount;
             
-            // Use REMAINING amount (accounting for partial settlements)
-            balancesByCurrency[txCurrency].userOwes += remaining;
-            
-            // Convert to user's currency using transaction's stored rates
+            // Convert to user's currency
             if (transaction.exchangeRates) {
               userOwesFriendConverted += convertAmount(
-                remaining,
+                split.amount,
                 txCurrency,
                 userCurrency,
                 transaction.exchangeRates.rates
               );
             } else {
-              // No exchange rates stored, assume same currency
-              userOwesFriendConverted += remaining;
+              userOwesFriendConverted += split.amount;
             }
           }
         }
       }
 
-      const netBalanceConverted = friendOwesUserConverted - userOwesFriendConverted;
+      // 3. Get all settlements with this friend
+      const settlements = await ctx.db
+        .query("settlements")
+        .withIndex("by_friend", (q) => q.eq("friendId", friend._id))
+        .collect();
+
+      let settlementsFromFriendConverted = 0;
+      let settlementsToFriendConverted = 0;
+
+      for (const settlement of settlements) {
+        // Only count settlements created by this user
+        if (settlement.createdById !== user._id) continue;
+
+        // Convert settlement amount to user currency
+        let convertedAmount = settlement.amount;
+        if (settlement.currency !== userCurrency && settlement.exchangeRates) {
+          convertedAmount = convertAmount(
+            settlement.amount,
+            settlement.currency,
+            userCurrency,
+            settlement.exchangeRates.rates
+          );
+        }
+
+        if (settlement.direction === "from_friend") {
+          // Friend paid user - reduces what friend owes
+          settlementsFromFriendConverted += convertedAmount;
+        } else if (settlement.direction === "to_friend") {
+          // User paid friend - reduces what user owes
+          settlementsToFriendConverted += convertedAmount;
+        }
+      }
+
+      // Calculate net balance:
+      // Net = (what friend owes) - (settlements from friend) - (what user owes) + (settlements to friend)
+      const netBalanceConverted = 
+        friendOwesUserConverted - settlementsFromFriendConverted 
+        - userOwesFriendConverted + settlementsToFriendConverted;
 
       if (Math.abs(netBalanceConverted) > 0.01) { // Use small threshold for floating point
         friendsWithBalances.push({
           friend,
-          friendOwesUser: friendOwesUserConverted,
-          userOwesFriend: userOwesFriendConverted,
+          friendOwesUser: friendOwesUserConverted - settlementsFromFriendConverted,
+          userOwesFriend: userOwesFriendConverted - settlementsToFriendConverted,
           netBalance: netBalanceConverted,
           isOwedToUser: netBalanceConverted > 0,
-          // Include breakdown by original currency for reference
           balancesByCurrency,
         });
       }

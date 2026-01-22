@@ -29,9 +29,8 @@ class ShareService {
         """
         
         for split in splits {
-            let status = split.isSettled ? "✅ Settled" : "⏳ Pending"
             let friendName = split.friend?.displayName ?? "Unknown"
-            text += "\n• \(friendName): \(split.formattedAmount) - \(status)"
+            text += "\n• \(friendName): \(split.formattedAmount)"
         }
         
         text += "\n\nSent via Break Even"

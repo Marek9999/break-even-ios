@@ -57,7 +57,6 @@ export default defineSchema({
     totalAmount: v.float64(),
     currency: v.string(),
     splitMethod: v.string(), // "equal", "unequal", "byParts", "byItem"
-    status: v.string(), // "pending", "partial", "settled"
     receiptFileId: v.optional(v.id("_storage")),
     items: v.optional(
       v.array(
@@ -98,18 +97,13 @@ export default defineSchema({
     transactionId: v.id("transactions"),
     friendId: v.id("friends"),
     amount: v.float64(),
-    settledAmount: v.optional(v.float64()), // How much has been settled (0 to amount), supports partial settlements
     percentage: v.optional(v.float64()),
-    isSettled: v.boolean(),
-    settledAt: v.optional(v.number()),
-    settledById: v.optional(v.id("users")), // Who marked it settled
     createdAt: v.number(),
   })
     .index("by_transaction", ["transactionId"])
-    .index("by_friend", ["friendId"])
-    .index("by_friend_settled", ["friendId", "isSettled"]),
+    .index("by_friend", ["friendId"]),
 
-  // Settlement records - tracks settlement history/audit trail
+  // Settlement records - tracks payment history between users
   settlements: defineTable({
     createdById: v.id("users"), // Who recorded this settlement
     friendId: v.id("friends"), // The friend involved in settlement
@@ -134,8 +128,6 @@ export default defineSchema({
         fetchedAt: v.number(),
       })
     ),
-    // Links to which splits were affected (stored as JSON for iOS compatibility)
-    affectedSplitsJson: v.string(), // JSON array: [{splitId, amountApplied}]
     settledAt: v.number(), // When settlement happened
     createdAt: v.number(), // When record was created
   })

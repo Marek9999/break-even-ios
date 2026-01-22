@@ -130,7 +130,6 @@ struct ConvexTransaction: Codable, Identifiable, Hashable {
     let totalAmount: Double
     let currency: String
     let splitMethod: String
-    let status: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
     let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
@@ -145,10 +144,6 @@ struct ConvexTransaction: Codable, Identifiable, Hashable {
     
     var createdAtDate: Date {
         Date(timeIntervalSince1970: createdAt / 1000)
-    }
-    
-    var isFullySettled: Bool {
-        status == "settled"
     }
     
     /// Format amount with the transaction's currency
@@ -204,7 +199,6 @@ struct EnrichedTransaction: Codable, Identifiable {
     let totalAmount: Double
     let currency: String
     let splitMethod: String
-    let status: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
     let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
@@ -218,10 +212,6 @@ struct EnrichedTransaction: Codable, Identifiable {
     
     var dateValue: Date {
         Date(timeIntervalSince1970: date / 1000)
-    }
-    
-    var isFullySettled: Bool {
-        status == "settled"
     }
     
     /// Format amount with the transaction's currency
@@ -255,33 +245,13 @@ struct ConvexSplit: Codable, Identifiable, Hashable {
     let transactionId: String
     let friendId: String
     let amount: Double
-    let settledAmount: Double?  // Amount already settled (0 to amount), supports partial settlements
     let percentage: Double?
-    let isSettled: Bool
-    let settledAt: Double?
-    let settledById: String?
     let createdAt: Double
     
     var id: String { _id }
     
     var formattedAmount: String {
         amount.asCurrency
-    }
-    
-    /// Remaining amount to be settled
-    var remainingAmount: Double {
-        amount - (settledAmount ?? 0)
-    }
-    
-    /// Whether this split is partially (but not fully) settled
-    var isPartiallySettled: Bool {
-        let settled = settledAmount ?? 0
-        return settled > 0 && settled < amount
-    }
-    
-    var settledAtDate: Date? {
-        guard let settledAt = settledAt else { return nil }
-        return Date(timeIntervalSince1970: settledAt / 1000)
     }
 }
 
@@ -291,11 +261,7 @@ struct EnrichedSplit: Codable, Identifiable, Hashable {
     let transactionId: String
     let friendId: String
     let amount: Double
-    let settledAmount: Double?  // Amount already settled (0 to amount), supports partial settlements
     let percentage: Double?
-    let isSettled: Bool
-    let settledAt: Double?
-    let settledById: String?
     let createdAt: Double
     let friend: ConvexFriend?
     
@@ -303,22 +269,6 @@ struct EnrichedSplit: Codable, Identifiable, Hashable {
     
     var formattedAmount: String {
         amount.asCurrency
-    }
-    
-    /// Remaining amount to be settled
-    var remainingAmount: Double {
-        amount - (settledAmount ?? 0)
-    }
-    
-    /// Whether this split is partially (but not fully) settled
-    var isPartiallySettled: Bool {
-        let settled = settledAmount ?? 0
-        return settled > 0 && !isSettled
-    }
-    
-    /// Format remaining amount for display
-    func formattedRemaining(code: String) -> String {
-        remainingAmount.asCurrency(code: code)
     }
     
     var personName: String {
@@ -430,22 +380,6 @@ enum ConvexSplitMethod: String, Codable, CaseIterable {
     }
 }
 
-// MARK: - Transaction Status
-
-enum TransactionStatus: String, Codable {
-    case pending = "pending"
-    case partial = "partial"
-    case settled = "settled"
-    
-    var displayName: String {
-        switch self {
-        case .pending: return "Pending"
-        case .partial: return "Partial"
-        case .settled: return "Settled"
-        }
-    }
-}
-
 // MARK: - Settlement
 
 /// Settlement record for history display
@@ -458,7 +392,6 @@ struct Settlement: Codable, Identifiable {
     let direction: String  // "to_friend" (user pays) or "from_friend" (friend pays user)
     let note: String?
     let exchangeRates: ExchangeRates?
-    let affectedSplitsJson: String  // JSON string of [{splitId, amountApplied}]
     let settledAt: Double
     let createdAt: Double
     
@@ -481,34 +414,12 @@ struct Settlement: Codable, Identifiable {
     var formattedAmount: String {
         amount.asCurrency(code: currency)
     }
-    
-    /// Parse affected splits from JSON
-    var affectedSplits: [AffectedSplit] {
-        guard let data = affectedSplitsJson.data(using: .utf8),
-              let splits = try? JSONDecoder().decode([AffectedSplit].self, from: data)
-        else { return [] }
-        return splits
-    }
-}
-
-/// Affected split in a settlement record
-struct AffectedSplit: Codable {
-    let splitId: String
-    let amountApplied: Double
 }
 
 /// Response from settleAmount mutation
 struct SettleAmountResponse: Codable {
     let settlementId: String
     let settledAmount: Double
-    let affectedCount: Int
-}
-
-/// Response from settlePartialSplit mutation
-struct SettlePartialSplitResponse: Codable {
-    let settlementId: String
-    let settledAmount: Double
-    let isFullySettled: Bool
 }
 
 // MARK: - Enriched Settlement (with converted amounts)
@@ -524,7 +435,6 @@ struct EnrichedSettlement: Codable, Identifiable {
     let note: String?
     let balanceBeforeSettlement: Double?  // Total owed before this settlement (for "X out of Y" display)
     let exchangeRates: ExchangeRates?
-    let affectedSplitsJson: String
     let settledAt: Double
     let createdAt: Double
     let convertedAmount: Double  // Amount in user's currency

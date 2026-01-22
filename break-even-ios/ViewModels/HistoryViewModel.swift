@@ -11,8 +11,6 @@ internal import Combine
 
 enum HistoryFilter: String, CaseIterable {
     case all = "All"
-    case pending = "Pending"
-    case settled = "Settled"
 }
 
 enum SortOrder: String, CaseIterable {
@@ -129,16 +127,6 @@ class HistoryViewModel {
     
     var filteredTransactions: [EnrichedTransaction] {
         var result = transactions
-        
-        // Apply status filter
-        switch selectedFilter {
-        case .all:
-            break
-        case .pending:
-            result = result.filter { !$0.isFullySettled }
-        case .settled:
-            result = result.filter { $0.isFullySettled }
-        }
         
         // Apply friend filter
         if let friendId = selectedFriendId {
