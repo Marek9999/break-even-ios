@@ -26,6 +26,8 @@ struct HomeView: View {
     @State private var selectedFriend: FriendWithBalance?
     @State private var receiptScanResult: ReceiptScanResult?
     
+    @Namespace private var avatarTransitionNamespace
+    
     private var currentTabData: [FriendWithBalance] {
         selectedTab == .owedToYou ? viewModel.owedToMe : viewModel.iOwe
     }
@@ -117,6 +119,7 @@ struct HomeView: View {
                     }
                 }
             )
+            .navigationTransition(.zoom(sourceID: friendWithBalance.friend.id, in: avatarTransitionNamespace))
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
@@ -148,6 +151,7 @@ struct HomeView: View {
                 contacts: currentTabData.map { ($0.friend, abs($0.netBalance)) },
                 isOwedToUser: selectedTab == .owedToYou,
                 currencyCode: viewModel.userCurrency,
+                avatarNamespace: avatarTransitionNamespace,
                 onPersonTap: { friend in
                     // Using sheet(item:) so just setting selectedFriend triggers the sheet
                     selectedFriend = currentTabData.first(where: { $0.friend.id == friend.id })
