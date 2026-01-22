@@ -423,7 +423,6 @@ struct BubbleClusterView: View {
     let contacts: [(friend: ConvexFriend, amount: Double)]
     let isOwedToUser: Bool
     let currencyCode: String
-    let avatarNamespace: Namespace.ID
     let onPersonTap: (ConvexFriend) -> Void
     
     @State private var engine = BubblePhysicsEngine()
@@ -445,7 +444,6 @@ struct BubbleClusterView: View {
                             size: bubbleSize(for: contact.amount),
                             isOwedToUser: isOwedToUser,
                             currencyCode: currencyCode,
-                            avatarNamespace: avatarNamespace,
                             engine: engine,
                             coordinateSpaceName: coordinateSpaceName,
                             onTap: {
@@ -508,7 +506,6 @@ struct BubbleView: View {
     let size: CGFloat
     let isOwedToUser: Bool
     let currencyCode: String
-    let avatarNamespace: Namespace.ID
     let engine: BubblePhysicsEngine
     let coordinateSpaceName: String
     let onTap: () -> Void
@@ -543,10 +540,8 @@ struct BubbleView: View {
                 .clipShape(Circle())
                 .padding(2)
                 .glassEffect(.regular.interactive(), in: Circle())
-                .matchedTransitionSource(id: friend.id, in: avatarNamespace)
             } else {
                 initialsView
-                    .matchedTransitionSource(id: friend.id, in: avatarNamespace)
             }
             
             // Amount in user's currency
@@ -627,20 +622,11 @@ struct BubbleClusterEmptyView: View {
 
 // MARK: - Preview
 
-struct BubbleClusterPreview: View {
-    @Namespace private var namespace
-    
-    var body: some View {
-        BubbleClusterView(
-            contacts: [],
-            isOwedToUser: true,
-            currencyCode: "USD",
-            avatarNamespace: namespace,
-            onPersonTap: { _ in }
-        )
-    }
-}
-
 #Preview {
-    BubbleClusterPreview()
+    BubbleClusterView(
+        contacts: [],
+        isOwedToUser: true,
+        currencyCode: "USD",
+        onPersonTap: { _ in }
+    )
 }

@@ -21,7 +21,7 @@ struct PersonDetailSheet: View {
     
     @State private var transactions: [EnrichedTransaction] = []
     @State private var settlements: [EnrichedSettlement] = []
-    @State private var scrollOffset: CGFloat = 0
+    @State private var scrollOffset: CGFloat = -74
     @State private var showSettleSheet = false
     @State private var isSettled = false
     @State private var shouldResetSlider = false
@@ -172,24 +172,23 @@ struct PersonDetailSheet: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     // Header with avatar and amount
                     HStack(spacing: 12) {
-                        if transitionProgress < 0.5 {
-                            avatarView(size: 60)
+                        avatarView(size: 60)
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(owedToMe ? "\(friend.name) owes you" : "You owe \(friend.name)")
-                                    .font(.headline)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.text.opacity(0.6))
-                                
-                                Text(displayAmount.asCurrency(code: userCurrency))
-                                    .font(.title)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(owedToMe ? .accent : .appDestructive)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .opacity(transitionProgress < 0.5 ? 1 : 0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(owedToMe ? "\(friend.name) owes you" : "You owe \(friend.name)")
+                                .font(.headline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.text.opacity(0.6))
+                            
+                            Text(displayAmount.asCurrency(code: userCurrency))
+                                .font(.title)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(owedToMe ? .accent : .appDestructive)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .opacity(transitionProgress < 0.5 ? 1 : 0)
+                    .animation(.smooth(duration: 0.25), value: transitionProgress < 0.5)
                     .padding(.top, 20)
                     
                     // Activity list
@@ -249,18 +248,14 @@ struct PersonDetailSheet: View {
                     .buttonStyle(.glassProminent)
                 }
                 ToolbarItem(placement: .principal) {
-                    ZStack {
-                        HStack {
-                            if transitionProgress >= 0.5 {
-                                avatarView(size: 36, fontSize: 14)
-                            }
-                            Text(friend.name)
-                        }
-                        .opacity(transitionProgress >= 0.5 ? 1 : 0)
+                    HStack(spacing: 8) {
+                        avatarView(size: 36, fontSize: 14)
+                        Text(friend.name)
                     }
+                    .opacity(transitionProgress >= 0.5 ? 1 : 0)
+                    .animation(.smooth(duration: 0.25), value: transitionProgress >= 0.5)
                 }
             }
-            .animation(.smooth(duration: 0.4), value: transitionProgress > 0.5)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 loadActivity()
@@ -991,7 +986,7 @@ private struct PersonDetailSheetPreviewContent: View {
     let transactions: [EnrichedTransaction]
     let settlements: [EnrichedSettlement]
     
-    @State private var scrollOffset: CGFloat = 0
+    @State private var scrollOffset: CGFloat = -74
     @State private var showSettleSheet = false
     @State private var isSettled = false
     @State private var shouldResetSlider = false
@@ -1120,24 +1115,23 @@ private struct PersonDetailSheetPreviewContent: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     // Header with avatar and amount
                     HStack(spacing: 12) {
-                        if transitionProgress < 0.5 {
-                            avatarView(size: 60)
+                        avatarView(size: 60)
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(owedToMe ? "\(friend.name) owes you" : "You owe \(friend.name)")
-                                    .font(.headline)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.text.opacity(0.6))
-                                
-                                Text(displayAmount.asCurrency(code: userCurrency))
-                                    .font(.title)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(owedToMe ? .accent : .appDestructive)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .opacity(transitionProgress < 0.5 ? 1 : 0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(owedToMe ? "\(friend.name) owes you" : "You owe \(friend.name)")
+                                .font(.headline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.text.opacity(0.6))
+                            
+                            Text(displayAmount.asCurrency(code: userCurrency))
+                                .font(.title)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(owedToMe ? .accent : .appDestructive)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .opacity(transitionProgress < 0.5 ? 1 : 0)
+                    .animation(.smooth(duration: 0.25), value: transitionProgress < 0.5)
                     .padding(.top, 20)
                     
                     // Activity list
@@ -1175,18 +1169,14 @@ private struct PersonDetailSheetPreviewContent: View {
                     .buttonStyle(.glassProminent)
                 }
                 ToolbarItem(placement: .principal) {
-                    ZStack {
-                        HStack {
-                            if transitionProgress >= 0.5 {
-                                avatarView(size: 36, fontSize: 14)
-                            }
-                            Text(friend.name)
-                        }
-                        .opacity(transitionProgress >= 0.5 ? 1 : 0)
+                    HStack(spacing: 8) {
+                        avatarView(size: 36, fontSize: 14)
+                        Text(friend.name)
                     }
+                    .opacity(transitionProgress >= 0.5 ? 1 : 0)
+                    .animation(.smooth(duration: 0.25), value: transitionProgress >= 0.5)
                 }
             }
-            .animation(.smooth(duration: 0.4), value: transitionProgress > 0.5)
             .navigationBarTitleDisplayMode(.inline)
         }
     }
