@@ -409,6 +409,7 @@ export const settleAmount = mutation({
     direction: v.string(), // "to_friend" (user pays) or "from_friend" (friend pays user)
     note: v.optional(v.string()),
     exchangeRatesJson: v.optional(v.string()),
+    settledAt: v.optional(v.string()), // Custom settlement date as timestamp string (milliseconds)
   },
   handler: async (ctx, args) => {
     const user = await ctx.db
@@ -532,6 +533,9 @@ export const settleAmount = mutation({
     // Use transaction's exchange rates if client didn't provide them
     const settlementExchangeRates = exchangeRates || firstTxWithRates?.exchangeRates;
 
+    // Use custom settledAt if provided, otherwise use current time
+    const settlementTime = args.settledAt ? parseFloat(args.settledAt) : Date.now();
+
     // Create settlement record
     const settlementId = await ctx.db.insert("settlements", {
       createdById: user._id,
@@ -542,7 +546,7 @@ export const settleAmount = mutation({
       note: args.note,
       balanceBeforeSettlement,
       exchangeRates: settlementExchangeRates,
-      settledAt: Date.now(),
+      settledAt: settlementTime,
       createdAt: Date.now(),
     });
 

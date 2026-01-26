@@ -7,19 +7,30 @@
 
 import SwiftUI
 
-/// Reusable sheet for entering settlement amount
-struct SettleAmountSheet: View {
-    @Environment(\.dismiss) var dismiss
-    
+/// Data model for presenting the settle view
+struct SettleViewData: Identifiable {
+    let id = UUID()
+    let friend: ConvexFriend
+    let userName: String
+    let userAvatarUrl: String?
     let maxAmount: Double
     let currency: String
-    let friendName: String
-    let isUserPaying: Bool  // true = user pays friend, false = friend pays user
-    let onSettle: (Double) async throws -> Void
+    let isUserPaying: Bool
+    let onSettle: (Double, Date) async throws -> Void
+}
+
+/// Full-screen view for entering settlement amount with visual transfer flow
+struct SettleView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    // Settlement data
+    let data: SettleViewData
     
     @State private var amountText: String = ""
+    @State private var settlementDate: Date = Date()
     @State private var isLoading = false
     @State private var error: String?
+    @State private var isSettled = false
     @FocusState private var isAmountFocused: Bool
     
     private var amount: Double {
@@ -27,117 +38,278 @@ struct SettleAmountSheet: View {
     }
     
     private var isValid: Bool {
-        amount > 0 && amount <= maxAmount + 0.01 // Small tolerance
+        amount > 0 && amount <= data.maxAmount + 0.01 // Small tolerance
     }
     
-    private var headerText: String {
-        isUserPaying ? "Pay \(friendName)" : "Receive from \(friendName)"
+    private var currencySymbol: String {
+        SupportedCurrency.from(code: data.currency)?.symbol ?? "$"
+    }
+    
+    private var userInitials: String {
+        let components = data.userName.split(separator: " ")
+        if components.count >= 2 {
+            let first = components[0].prefix(1)
+            let last = components[1].prefix(1)
+            return "\(first)\(last)".uppercased()
+        } else if let firstName = components.first, firstName.count >= 2 {
+            return String(firstName.prefix(2)).uppercased()
+        } else {
+            return String(data.userName.prefix(2)).uppercased()
+        }
     }
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                // Header
-                VStack(spacing: 8) {
-                    Image(systemName: isUserPaying ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(isUserPaying ? Color.appDestructive : Color.accent)
+            ScrollView {
+                // Main content card
+                VStack(spacing: 24) {
+                    // Transfer Flow Header
+                    transferFlowSection
                     
-                    Text(headerText)
-                        .font(.headline)
-                    
-                    Text("Max: \(maxAmount.asCurrency(code: currency))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 20)
-                
-                // Amount Input
-                VStack(spacing: 8) {
-                    HStack(alignment: .center, spacing: 4) {
-                        Text(SupportedCurrency.from(code: currency)?.symbol ?? "$")
-                            .font(.system(size: 36, weight: .medium))
+                    // Total to settle
+                    HStack(spacing: 4) {
+                        Text("Total to settle")
+                            .font(.headline)
                             .foregroundStyle(.secondary)
-                        
-                        TextField("0", text: $amountText)
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.center)
-                            .focused($isAmountFocused)
-                            .minimumScaleFactor(0.5)
+                        Spacer()
+                        Text(data.maxAmount.asCurrency(code: data.currency))
+                            .font(.title)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(data.isUserPaying ? Color.appDestructive : Color.accent)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                    .frame(maxWidth: .infinity)
-                    .glassEffect(.regular.tint(Color.accent.opacity(0.1)))
+                    .padding(.vertical, 8)
                     
+                    // Amount Input
+                    amountInputSection
+                    
+                    // Quick amount buttons
+                    quickAmountButtonsSection
+                    
+                    // Error message
                     if let error = error {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
                     }
+                    
+                    // Settle Button
+                    settleButton
                 }
-                .padding(.horizontal)
-                
-                // Quick amount buttons
-                HStack(spacing: 12) {
-                    QuickAmountButton(label: "25%", amount: maxAmount * 0.25, currency: currency) {
-                        amountText = formatAmount(maxAmount * 0.25)
-                    }
-                    QuickAmountButton(label: "50%", amount: maxAmount * 0.5, currency: currency) {
-                        amountText = formatAmount(maxAmount * 0.5)
-                    }
-                    QuickAmountButton(label: "Full", amount: maxAmount, currency: currency) {
-                        amountText = formatAmount(maxAmount)
-                    }
-                }
-                .padding(.horizontal)
-                
-                Spacer()
-                
-                // Settle Button
-                Button {
-                    Task { await settle() }
-                } label: {
-                    HStack {
-                        if isLoading {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text("Settle \(amount.asCurrency(code: currency))")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(!isValid || isLoading)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding()
             }
-            .navigationTitle("Settle Up")
+            .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isAmountFocused = false
+            }
+            .navigationTitle("Settle Payment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .fontWeight(.medium)
                     }
+                    .disabled(isLoading)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text(settlementDate.smartFormatted)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .overlay {
+                            // 3. Put the REAL DatePicker on top, but make it invisible
+                            DatePicker(
+                                "",
+                                selection: $settlementDate,
+                                in: ...Date(),
+                                displayedComponents: .date
+                            )
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                            // This is the magic: it's still there to be tapped,
+                            // but it doesn't render visually.
+                            .opacity(0.011)
+                            .contentShape(Rectangle())
+                        }
                 }
             }
-        }
-        .onAppear {
-            // Pre-fill with full amount
-            amountText = formatAmount(maxAmount)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isAmountFocused = true
+            .onAppear {
+                // Pre-fill with full amount
+                amountText = formatAmount(data.maxAmount)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isAmountFocused = true
+                }
             }
+            .interactiveDismissDisabled(isLoading)
         }
-        .interactiveDismissDisabled(isLoading)
     }
     
+    // MARK: - Transfer Flow Section
+    
+    private var transferFlowSection: some View {
+        VStack(alignment: .center,spacing: 12) {
+            // Top person (Friend)
+            personRow(
+                name: data.friend.name,
+                avatarUrl: data.friend.avatarUrl,
+                initials: data.friend.initials,
+                isFriend: true
+            )
+            
+            // Direction arrow with text and date picker
+            HStack {
+                
+                // Arrow and text
+                HStack(spacing: 12) {
+                    Image(systemName: data.isUserPaying ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(data.isUserPaying ? Color.appDestructive : Color.accent)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill( data.isUserPaying ? Color.destructive.opacity(0.2) : Color.accent.opacity(0.2))
+                        )
+                    
+                    Text(data.isUserPaying ? "You are paying" : "You will receive")
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(data.isUserPaying ? Color.appDestructive : Color.accent)
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 2)
+                
+            }
+            .padding(.vertical, 4)
+            
+            // Bottom person (User - "Me")
+            personRow(
+                name: "Me",
+                avatarUrl: data.userAvatarUrl,
+                initials: userInitials,
+                isFriend: false
+            )
+        }
+        .padding(.vertical, 8)
+    }
+    
+    // MARK: - Person Row
+    
+    private func personRow(name: String, avatarUrl: String?, initials: String, isFriend: Bool) -> some View {
+        HStack(spacing: 16) {
+            // Avatar
+            avatarImage(url: avatarUrl, initials: initials, isFriend: isFriend)
+                .frame(width: 40, height: 40)
+            
+            // Name
+            Text(name)
+                .font(.headline)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
+            
+        }
+    }
+    
+    // MARK: - Avatar Image
+    
+    @ViewBuilder
+    private func avatarImage(url: String?, initials: String, isFriend: Bool) -> some View {
+        if let avatarUrl = url, let imageUrl = URL(string: avatarUrl) {
+            AsyncImage(url: imageUrl) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .clipShape(Circle())
+                case .failure, .empty:
+                    initialsAvatar(initials: initials, isFriend: isFriend)
+                @unknown default:
+                    initialsAvatar(initials: initials, isFriend: isFriend)
+                }
+            }
+        } else {
+            initialsAvatar(initials: initials, isFriend: isFriend)
+        }
+    }
+    
+    private func initialsAvatar(initials: String, isFriend: Bool) -> some View {
+        Text(initials)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(isFriend ? .accent : .white)
+            .frame(width: 40, height: 40)
+            .background(isFriend ? Color.accentSecondary : Color.accentColor)
+            .clipShape(Circle())
+    }
+    
+    // MARK: - Amount Input Section
+    
+    private var amountInputSection: some View {
+        HStack(alignment: .center, spacing: 4) {
+            Text(currencySymbol)
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(.secondary)
+            
+            TextField("0", text: $amountText)
+                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.center)
+                .focused($isAmountFocused)
+                .minimumScaleFactor(0.5)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .background(Color.accentSecondary.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+    
+    // MARK: - Quick Amount Buttons
+    
+    private var quickAmountButtonsSection: some View {
+        HStack(spacing: 12) {
+            QuickAmountButton(label: "50%", amount: data.maxAmount * 0.5, currency: data.currency) {
+                amountText = formatAmount(data.maxAmount * 0.5)
+            }
+            QuickAmountButton(label: "75%", amount: data.maxAmount * 0.75, currency: data.currency) {
+                amountText = formatAmount(data.maxAmount * 0.75)
+            }
+            QuickAmountButton(label: "100%", amount: data.maxAmount, currency: data.currency) {
+                amountText = formatAmount(data.maxAmount)
+            }
+        }
+    }
+    
+    // MARK: - Settle Button
+    
+    private var settleButton: some View {
+        Button {
+            Task { await settle() }
+        } label: {
+            HStack {
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Text("Settle \(amount.asCurrency(code: data.currency))")
+                        .fontWeight(.semibold)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.glassProminent)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!isValid || isLoading)
+    }
+    
+    // MARK: - Helper Methods
+    
     private func formatAmount(_ value: Double) -> String {
-        // Format with 2 decimal places, removing trailing zeros
         let formatted = String(format: "%.2f", value)
         if formatted.hasSuffix(".00") {
             return String(formatted.dropLast(3))
@@ -154,8 +326,10 @@ struct SettleAmountSheet: View {
         error = nil
         
         do {
-            try await onSettle(amount)
+            try await data.onSettle(amount, settlementDate)
             await MainActor.run {
+                isSettled = true
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 dismiss()
             }
         } catch {
@@ -194,15 +368,58 @@ struct QuickAmountButton: View {
 
 // MARK: - Preview
 
-#Preview {
-    SettleAmountSheet(
-        maxAmount: 150.50,
-        currency: "USD",
-        friendName: "Alice",
-        isUserPaying: false,
-        onSettle: { amount in
-            print("Settling \(amount)")
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-        }
+#Preview("User Pays Friend") {
+    SettleView(
+        data: SettleViewData(
+            friend: ConvexFriend(
+                _id: "1",
+                ownerId: "owner",
+                linkedUserId: nil,
+                name: "Alice Johnson",
+                email: "alice@example.com",
+                phone: nil,
+                avatarUrl: nil,
+                isDummy: true,
+                isSelf: false,
+                createdAt: Date().timeIntervalSince1970
+            ),
+            userName: "John Doe",
+            userAvatarUrl: nil,
+            maxAmount: 150.50,
+            currency: "CAD",
+            isUserPaying: true,
+            onSettle: { amount, date in
+                print("Settling \(amount) on \(date)")
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        )
+    )
+}
+
+#Preview("Friend Pays User") {
+    SettleView(
+        data: SettleViewData(
+            friend: ConvexFriend(
+                _id: "1",
+                ownerId: "owner",
+                linkedUserId: nil,
+                name: "Bob Smith",
+                email: "bob@example.com",
+                phone: nil,
+                avatarUrl: nil,
+                isDummy: true,
+                isSelf: false,
+                createdAt: Date().timeIntervalSince1970
+            ),
+            userName: "Jane Doe",
+            userAvatarUrl: nil,
+            maxAmount: 75.00,
+            currency: "USD",
+            isUserPaying: false,
+            onSettle: { amount, date in
+                print("Settling \(amount) on \(date)")
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        )
     )
 }

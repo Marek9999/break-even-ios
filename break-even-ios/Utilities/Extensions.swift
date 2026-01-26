@@ -43,15 +43,18 @@ extension Date {
         return formatter.string(from: self)
     }
     
-    /// Smart date format: "Jan 5" for current year, "Jan 5, 2025" for other years
+    /// Smart date format: "Jan 5" for current year, "Jan 5, '25" for other years
+    /// Uses abbreviated year (.twoDigits) to keep UI compact
     var smartFormatted: String {
-        let dateYear = Calendar.current.component(.year, from: self)
-        let currentYear = Calendar.current.component(.year, from: Date())
+        let currentYear = Calendar.current.component(.year, from: .now)
+        let targetYear = Calendar.current.component(.year, from: self)
         
-        if dateYear == currentYear {
+        if currentYear == targetYear {
+            // Omit the year if it matches the current year
             return self.formatted(.dateTime.month(.abbreviated).day())
         } else {
-            return self.formatted(.dateTime.month(.abbreviated).day().year())
+            // Include abbreviated year if it's a different year
+            return self.formatted(.dateTime.month(.abbreviated).day().year(.twoDigits))
         }
     }
     

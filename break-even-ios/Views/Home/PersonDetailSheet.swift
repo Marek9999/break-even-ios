@@ -83,9 +83,9 @@ struct PersonDetailSheet: View {
     @State private var transactions: [EnrichedTransaction] = []
     @State private var settlements: [EnrichedSettlement] = []
     @State private var scrollOffset: CGFloat = -74
-    @State private var showSettleSheet = false
-    @State private var isSettled = false
     @State private var shouldResetSlider = false
+    @State private var settleViewData: SettleViewData?
+    @State private var isSettled = false
     @State private var isLoading = false
     @State private var showOlderItems = false
     @State private var dominantColor: Color?
@@ -107,6 +107,19 @@ struct PersonDetailSheet: View {
     
     private var userCurrency: String {
         balance.userCurrency
+    }
+    
+    /// Current user's display name from Clerk
+    private var currentUserName: String {
+        if let user = clerk.user {
+            let firstName = user.firstName ?? ""
+            let lastName = user.lastName ?? ""
+            let fullName = [firstName, lastName]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            return fullName.isEmpty ? "Me" : fullName
+        }
+        return "Me"
     }
     
     // MARK: - Activity Items (Combined Feed)
@@ -269,31 +282,14 @@ struct PersonDetailSheet: View {
                 if displayAmount > 0 {
                     SlideToConfirmButton(
                         onSlideComplete: {
-                            showSettleSheet = true
+                            presentSettleView()
                         },
-                        isConfirmed: $isSettled,
+                        isConfirmed: .constant(false),
                         shouldReset: $shouldResetSlider
                     )
                     .padding(.horizontal, 20)
                     .padding(.bottom, 0)
                 }
-            }
-            .sheet(isPresented: $showSettleSheet, onDismiss: {
-                // Reset slider if sheet was dismissed without settling
-                if !isSettled {
-                    shouldResetSlider = true
-                }
-            }) {
-                SettleAmountSheet(
-                    maxAmount: displayAmount,
-                    currency: userCurrency,
-                    friendName: friend.name,
-                    isUserPaying: !owedToMe,  // If friend owes me, I'm receiving; if I owe, I'm paying
-                    onSettle: { amount in
-                        try await settleAmount(amount)
-                    }
-                )
-                .presentationDetents([.medium])
             }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.contentOffset.y
@@ -332,19 +328,28 @@ struct PersonDetailSheet: View {
             }
             
         }
-        .safeAreaBar(edge: .top) {
+        .overlay(alignment: .top) {
             if let color = dominantColor {
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.35), color.opacity(0)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(height: 80)
-                    .allowsHitTesting(false)
+                LinearGradient(
+                    colors: [color.opacity(0.35), color.opacity(0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 80)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
             }
+        }
+        .fullScreenCover(item: $settleViewData) { data in
+            SettleView(data: data)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .onDisappear {
+                    // Reset slider when settle view is dismissed
+                    if !isSettled {
+                        shouldResetSlider = true
+                    }
+                }
         }
     }
     
@@ -590,37 +595,50 @@ struct PersonDetailSheet: View {
         }
     }
     
-    // MARK: - Settle Amount
+    // MARK: - Present Settle View
     
-    /// Settle a specific amount with the friend (supports partial settlements)
-    private func settleAmount(_ amount: Double) async throws {
-        guard let clerkId = clerk.user?.id else {
-            throw ConvexServiceError.notAuthenticated
-        }
-        
-        // Direction: if friend owes me, they're paying me back ("from_friend")
-        // If I owe them, I'm paying them ("to_friend")
+    /// Present the full-screen settle view
+    private func presentSettleView() {
+        // Capture values needed for the closure
+        let clerkId = clerk.user?.id
+        let friendId = friend.id
+        let currency = userCurrency
         let direction = owedToMe ? "from_friend" : "to_friend"
+        let convex = convexService
         
-        let _: SettleAmountResponse = try await convexService.client.mutation(
-            "transactions:settleAmount",
-            with: [
-                "clerkId": clerkId,
-                "friendId": friend.id,
-                "amount": String(amount),
-                "currency": userCurrency,
-                "direction": direction
-            ]
-        )
-        
-        await MainActor.run {
-            isSettled = true
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                dismiss()
+        settleViewData = SettleViewData(
+            friend: friend,
+            userName: currentUserName,
+            userAvatarUrl: clerk.user?.imageUrl,
+            maxAmount: displayAmount,
+            currency: userCurrency,
+            isUserPaying: !owedToMe,
+            onSettle: { [self] amount, date in
+                guard let clerkId = clerkId else {
+                    throw ConvexServiceError.notAuthenticated
+                }
+                
+                // Convert date to timestamp in milliseconds
+                let settledAtTimestamp = String(Int64(date.timeIntervalSince1970 * 1000))
+                
+                let _: SettleAmountResponse = try await convex.client.mutation(
+                    "transactions:settleAmount",
+                    with: [
+                        "clerkId": clerkId,
+                        "friendId": friendId,
+                        "amount": String(amount),
+                        "currency": currency,
+                        "direction": direction,
+                        "settledAt": settledAtTimestamp
+                    ]
+                )
+                
+                // Mark as settled so we don't reset the slider
+                await MainActor.run {
+                    isSettled = true
+                }
             }
-        }
+        )
     }
     
     // MARK: - Avatar View
