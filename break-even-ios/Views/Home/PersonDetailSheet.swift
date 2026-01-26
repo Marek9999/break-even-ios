@@ -10,6 +10,67 @@ import Clerk
 import ConvexMobile
 internal import Combine
 
+// MARK: - Dominant Color Extractor
+
+extension UIImage {
+    /// Extracts the dominant color from an image by downsampling and analyzing pixel data
+    func dominantColor() -> Color? {
+        // Downsample to 10x10 for performance
+        let size = CGSize(width: 10, height: 10)
+        
+        guard let cgImage = self.cgImage else { return nil }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var rawData = [UInt8](repeating: 0, count: Int(size.width * size.height * 4))
+        
+        guard let context = CGContext(
+            data: &rawData,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: Int(size.width) * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        
+        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
+        
+        // Count color occurrences (quantize to reduce unique colors)
+        var colorCounts: [UInt32: Int] = [:]
+        
+        for i in stride(from: 0, to: rawData.count, by: 4) {
+            let r = rawData[i]
+            let g = rawData[i + 1]
+            let b = rawData[i + 2]
+            let a = rawData[i + 3]
+            
+            // Skip transparent or nearly white/black pixels
+            guard a > 128 else { continue }
+            let brightness = (Int(r) + Int(g) + Int(b)) / 3
+            guard brightness > 30 && brightness < 225 else { continue }
+            
+            // Quantize to reduce unique colors (divide by 16 = shift right 4)
+            let quantizedR = (r >> 4) << 4
+            let quantizedG = (g >> 4) << 4
+            let quantizedB = (b >> 4) << 4
+            
+            let key = (UInt32(quantizedR) << 16) | (UInt32(quantizedG) << 8) | UInt32(quantizedB)
+            colorCounts[key, default: 0] += 1
+        }
+        
+        // Find most common color
+        guard let dominantKey = colorCounts.max(by: { $0.value < $1.value })?.key else {
+            return nil
+        }
+        
+        let r = CGFloat((dominantKey >> 16) & 0xFF) / 255.0
+        let g = CGFloat((dominantKey >> 8) & 0xFF) / 255.0
+        let b = CGFloat(dominantKey & 0xFF) / 255.0
+        
+        return Color(red: r, green: g, blue: b)
+    }
+}
+
 struct PersonDetailSheet: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.clerk) private var clerk
@@ -27,6 +88,8 @@ struct PersonDetailSheet: View {
     @State private var shouldResetSlider = false
     @State private var isLoading = false
     @State private var showOlderItems = false
+    @State private var dominantColor: Color?
+    @State private var cachedAvatarImage: UIImage?
     @Namespace private var olderItemsNamespace
     
     private var transitionProgress: CGFloat {
@@ -201,6 +264,7 @@ struct PersonDetailSheet: View {
                 }
                 .padding(.horizontal, 20)
             }
+            
             .safeAreaBar(edge: .bottom) {
                 if displayAmount > 0 {
                     SlideToConfirmButton(
@@ -260,6 +324,26 @@ struct PersonDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 loadActivity()
+            }
+            .onChange(of: friend.id) { _, _ in
+                // Reset dominant color and cached image when friend changes
+                dominantColor = nil
+                cachedAvatarImage = nil
+            }
+            
+        }
+        .safeAreaBar(edge: .top) {
+            if let color = dominantColor {
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.35), color.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(height: 80)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -544,17 +628,45 @@ struct PersonDetailSheet: View {
     @ViewBuilder
     private func avatarView(size: CGFloat = 40, fontSize: CGFloat = 18) -> some View {
         if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
-            AsyncImage(url: url) { image in
-                image
+            // Use cached image if available, otherwise show placeholder while loading
+            if let cachedImage = cachedAvatarImage {
+                Image(uiImage: cachedImage)
                     .resizable()
                     .scaledToFill()
-            } placeholder: {
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else {
                 initialsView(size: size, fontSize: fontSize)
+                    .task(id: "\(friend.id)-\(avatarUrl)") {
+                        await loadAvatarImage(from: url)
+                    }
             }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
         } else {
             initialsView(size: size, fontSize: fontSize)
+        }
+    }
+    
+    private func loadAvatarImage(from url: URL) async {
+        let capturedFriendId = friend.id
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let uiImage = UIImage(data: data) else { return }
+            
+            // Only update if we're still showing the same friend
+            await MainActor.run {
+                guard friend.id == capturedFriendId else { return }
+                cachedAvatarImage = uiImage
+                
+                // Extract dominant color from the loaded image
+                if dominantColor == nil, let color = uiImage.dominantColor() {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        dominantColor = color
+                    }
+                }
+            }
+        } catch {
+            // Silently fail - placeholder will remain
         }
     }
     
@@ -565,6 +677,7 @@ struct PersonDetailSheet: View {
             .frame(width: size, height: size)
             .glassEffect(.regular.tint(Color.accent.opacity(0.4)), in: .circle)
     }
+    
 }
 
 // MARK: - Slide To Confirm Button
