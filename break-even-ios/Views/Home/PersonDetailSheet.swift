@@ -67,7 +67,19 @@ extension UIImage {
         let g = CGFloat((dominantKey >> 8) & 0xFF) / 255.0
         let b = CGFloat(dominantKey & 0xFF) / 255.0
         
-        return Color(red: r, green: g, blue: b)
+        // --- VIBRANCY BOOST ---
+        let uiColor = UIColor(red: r, green: g, blue: b, alpha: 1.0)
+        var h: CGFloat = 0, s: CGFloat = 0, br: CGFloat = 0, a: CGFloat = 0
+        
+        uiColor.getHue(&h, saturation: &s, brightness: &br, alpha: &a)
+        
+        // 1. Boost Saturation: Ensure it's at least 60% saturated
+        let vibrantS = max(s * 1.5, 0.6)
+        
+        // 2. Adjust Brightness: Ensure it's not too dark (at least 50% bright)
+        let vibrantBr = max(br, 0.5)
+        
+        return Color(hue: Double(h), saturation: Double(vibrantS), brightness: Double(vibrantBr))
     }
 }
 
@@ -83,14 +95,16 @@ struct PersonDetailSheet: View {
     @State private var transactions: [EnrichedTransaction] = []
     @State private var settlements: [EnrichedSettlement] = []
     @State private var scrollOffset: CGFloat = -74
-    @State private var shouldResetSlider = false
-    @State private var settleViewData: SettleViewData?
-    @State private var isSettled = false
     @State private var isLoading = false
     @State private var showOlderItems = false
     @State private var dominantColor: Color?
     @State private var cachedAvatarImage: UIImage?
     @Namespace private var olderItemsNamespace
+    @Namespace private var settleTransitionNamespace
+    
+    // Keyboard pre-warming
+    @State private var keyboardPrewarmText = ""
+    @FocusState private var keyboardPrewarmFocused: Bool
     
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
@@ -280,13 +294,28 @@ struct PersonDetailSheet: View {
             
             .safeAreaBar(edge: .bottom) {
                 if displayAmount > 0 {
-                    SlideToConfirmButton(
-                        onSlideComplete: {
-                            presentSettleView()
-                        },
-                        isConfirmed: .constant(false),
-                        shouldReset: $shouldResetSlider
-                    )
+                    NavigationLink {
+                        SettleView(
+                            friend: friend,
+                            userName: currentUserName,
+                            userAvatarUrl: clerk.user?.imageUrl,
+                            maxAmount: displayAmount,
+                            currency: userCurrency,
+                            isUserPaying: !owedToMe,
+                            onSettle: { amount, date in
+                                try await settleAmount(amount: amount, date: date)
+                            }
+                        )
+                        .navigationTransition(.zoom(sourceID: "settle-button", in: settleTransitionNamespace))
+                    } label: {
+                        Text("Settle")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .matchedTransitionSource(id: "settle-button", in: settleTransitionNamespace)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 0)
                 }
@@ -320,13 +349,21 @@ struct PersonDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 loadActivity()
+                // Pre-warm keyboard system to avoid first-use lag
+                prewarmKeyboard()
+            }
+            .background {
+                // Hidden TextField for keyboard pre-warming
+                TextField("", text: $keyboardPrewarmText)
+                    .focused($keyboardPrewarmFocused)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
             }
             .onChange(of: friend.id) { _, _ in
                 // Reset dominant color and cached image when friend changes
                 dominantColor = nil
                 cachedAvatarImage = nil
             }
-            
         }
         .overlay(alignment: .top) {
             if let color = dominantColor {
@@ -339,17 +376,6 @@ struct PersonDetailSheet: View {
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
             }
-        }
-        .fullScreenCover(item: $settleViewData) { data in
-            SettleView(data: data)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .onDisappear {
-                    // Reset slider when settle view is dismissed
-                    if !isSettled {
-                        shouldResetSlider = true
-                    }
-                }
         }
     }
     
@@ -377,6 +403,19 @@ struct PersonDetailSheet: View {
                     self.transactions = response.transactions
                     self.settlements = response.settlements
                 }
+            }
+        }
+    }
+    
+    // MARK: - Keyboard Pre-warming
+    
+    /// Pre-warm the keyboard system to avoid first-use lag
+    private func prewarmKeyboard() {
+        // Brief focus/unfocus cycle to initialize keyboard system
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            keyboardPrewarmFocused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                keyboardPrewarmFocused = false
             }
         }
     }
@@ -595,49 +634,27 @@ struct PersonDetailSheet: View {
         }
     }
     
-    // MARK: - Present Settle View
+    // MARK: - Settle Amount
     
-    /// Present the full-screen settle view
-    private func presentSettleView() {
-        // Capture values needed for the closure
-        let clerkId = clerk.user?.id
-        let friendId = friend.id
-        let currency = userCurrency
-        let direction = owedToMe ? "from_friend" : "to_friend"
-        let convex = convexService
+    /// Execute settlement with Convex backend
+    private func settleAmount(amount: Double, date: Date) async throws {
+        guard let clerkId = clerk.user?.id else {
+            throw ConvexServiceError.notAuthenticated
+        }
         
-        settleViewData = SettleViewData(
-            friend: friend,
-            userName: currentUserName,
-            userAvatarUrl: clerk.user?.imageUrl,
-            maxAmount: displayAmount,
-            currency: userCurrency,
-            isUserPaying: !owedToMe,
-            onSettle: { [self] amount, date in
-                guard let clerkId = clerkId else {
-                    throw ConvexServiceError.notAuthenticated
-                }
-                
-                // Convert date to timestamp in milliseconds
-                let settledAtTimestamp = String(Int64(date.timeIntervalSince1970 * 1000))
-                
-                let _: SettleAmountResponse = try await convex.client.mutation(
-                    "transactions:settleAmount",
-                    with: [
-                        "clerkId": clerkId,
-                        "friendId": friendId,
-                        "amount": String(amount),
-                        "currency": currency,
-                        "direction": direction,
-                        "settledAt": settledAtTimestamp
-                    ]
-                )
-                
-                // Mark as settled so we don't reset the slider
-                await MainActor.run {
-                    isSettled = true
-                }
-            }
+        let direction = owedToMe ? "from_friend" : "to_friend"
+        let settledAtTimestamp = String(Int64(date.timeIntervalSince1970 * 1000))
+        
+        let _: SettleAmountResponse = try await convexService.client.mutation(
+            "transactions:settleAmount",
+            with: [
+                "clerkId": clerkId,
+                "friendId": friend.id,
+                "amount": String(amount),
+                "currency": userCurrency,
+                "direction": direction,
+                "settledAt": settledAtTimestamp
+            ]
         )
     }
     

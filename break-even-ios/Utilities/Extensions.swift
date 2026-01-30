@@ -54,7 +54,7 @@ extension Date {
             return self.formatted(.dateTime.month(.abbreviated).day())
         } else {
             // Include abbreviated year if it's a different year
-            return self.formatted(.dateTime.month(.abbreviated).day().year(.twoDigits))
+            return self.formatted(.dateTime.month(.abbreviated).day().year())
         }
     }
     
