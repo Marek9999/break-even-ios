@@ -110,7 +110,8 @@ enum AmountTextConfig {
     
     static func textSize(for text: String) -> CGSize {
         let attributes = [NSAttributedString.Key.font: uiFont]
-        return (text as NSString).size(withAttributes: attributes)
+        let size = (text as NSString).size(withAttributes: attributes)
+        return size
     }
 }
 
@@ -127,7 +128,7 @@ struct SettleView: View {
     @State private var amount: Double = 0
     @State private var amountText: String = ""
     @State private var settlementDate: Date = Date()
-    @State private var isLoading = false
+    @State private var settleState: SettleState = .idle
     @State private var error: String?
     
     // Props - passed in directly, no transformation in init
@@ -173,6 +174,12 @@ struct SettleView: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(isUserPaying ? Color.appDestructive : Color.accent)
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .background(
+                    Capsule()
+                        .fill(isUserPaying ? Color.appDestructive.opacity(0.1) : Color.accent.opacity(0.12))
+                )
                 
                 // Amount input with Liquid Glass text display
                 glassAmountInputSection
@@ -192,7 +199,7 @@ struct SettleView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .onAppear {
-            // Set initial value in onAppear, not init - prevents first-tap lag
+            // Set initial value in onAppear, not init
             self.amount = maxAmount
             self.amountText = formatAmountForDisplay(maxAmount)
         }
@@ -202,6 +209,15 @@ struct SettleView: View {
             let newAmount = Double(cleaned) ?? 0
             amount = newAmount
             
+            // Skip re-formatting if user is typing a decimal (trailing "." or has decimal digits)
+            // This preserves the decimal point while user is still typing
+            let hasTrailingDecimal = cleaned.hasSuffix(".")
+            let hasPartialDecimal = cleaned.contains(".") && (cleaned.split(separator: ".").last?.count ?? 0) > 0
+            
+            if hasTrailingDecimal || hasPartialDecimal {
+                return
+            }
+            
             // Format with commas for display (only if the value changed to avoid cursor issues)
             let formatted = formatAmountForDisplay(newAmount)
             if formatted != newValue && !newValue.isEmpty {
@@ -209,21 +225,15 @@ struct SettleView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            VStack(spacing: 8) {
-                if isLoading {
-                    ProgressView("Processing...")
-                        .frame(height: 56)
-                } else {
-                    SlideToSettleView(
-                        title: "Slide to Settle \(amount.asCurrency(code: currency))",
-                        onUnlock: {
-                            Task { await settle() }
-                        }
-                    )
-                    .opacity(isValid ? 1 : 0.5)
-                    .allowsHitTesting(isValid)
+            SlideToSettleView(
+                title: "Slide to Settle \(amount.asCurrency(code: currency))",
+                state: $settleState,
+                onSlideComplete: {
+                    Task { await settle() }
                 }
-            }
+            )
+            .opacity(isValid || settleState != .idle ? 1 : 0.5)
+            .allowsHitTesting(isValid || settleState != .idle)
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
         }
@@ -244,7 +254,7 @@ struct SettleView: View {
                     }
             }
         }
-        .interactiveDismissDisabled(isLoading)
+        .interactiveDismissDisabled(settleState != .idle)
     }
     
     // MARK: - Transfer Flow Section
@@ -272,7 +282,7 @@ struct SettleView: View {
             
             // Bottom person
             personRow(
-                name: friend.name,
+                name: friend.name.components(separatedBy: " ").first ?? friend.name,
                 avatarUrl: friend.avatarUrl,
                 initials: friend.initials,
                 isUser: !isUserPaying
@@ -431,19 +441,47 @@ struct SettleView: View {
     private func settle() async {
         guard isValid else { return }
         
-        isLoading = true
-        error = nil
+        // Transition to processing state
+        await MainActor.run {
+            withAnimation {
+                settleState = .processing
+            }
+            error = nil
+        }
         
         do {
             try await onSettle(amount, settlementDate)
+            
+            // Success - show completed state
             await MainActor.run {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation {
+                    settleState = .completed
+                }
+            }
+            
+            // Wait 2 seconds then dismiss
+            try? await Task.sleep(for: .seconds(2))
+            await MainActor.run {
                 dismiss()
             }
+            
         } catch {
+            // Failure - show failed state
             await MainActor.run {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                withAnimation {
+                    settleState = .failed
+                }
                 self.error = error.localizedDescription
-                self.isLoading = false
+            }
+            
+            // Wait 1 second then reset to idle
+            try? await Task.sleep(for: .seconds(1))
+            await MainActor.run {
+                withAnimation {
+                    settleState = .idle
+                }
             }
         }
     }

@@ -7,6 +7,39 @@
 
 import SwiftUI
 import Clerk
+import UIKit
+
+// MARK: - Keyboard Pre-warming
+
+/// Pre-warms the iOS keyboard to eliminate first-focus lag.
+/// iOS lazily initializes the keyboard infrastructure on first use, which causes
+/// a noticeable delay ("System gesture gate timed out" errors). This function
+/// triggers that initialization at app launch instead of on first user interaction.
+enum KeyboardPrewarmer {
+    private static var hasPrewarmed = false
+    
+    static func prewarm() {
+        guard !hasPrewarmed else { return }
+        hasPrewarmed = true
+        
+        // Get the key window
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return
+        }
+        
+        // Create a hidden text field to trigger keyboard initialization
+        // This eliminates the first-focus lag on TextFields
+        let hiddenField = UITextField(frame: .zero)
+        hiddenField.autocorrectionType = .no
+        hiddenField.spellCheckingType = .no
+        
+        window.addSubview(hiddenField)
+        hiddenField.becomeFirstResponder()
+        hiddenField.resignFirstResponder()
+        hiddenField.removeFromSuperview()
+    }
+}
 
 @main
 struct break_even_iosApp: App {
@@ -21,6 +54,11 @@ struct break_even_iosApp: App {
             RootView()
                 .environment(\.clerk, clerk)
                 .environment(\.convexService, convexService)
+                .onAppear {
+                    // Pre-warm keyboard to eliminate first TextField focus lag
+                    // This must be called after the window exists
+                    KeyboardPrewarmer.prewarm()
+                }
                 .task {
                     // Configure Clerk
                     print("🔧 Configuring Clerk...")

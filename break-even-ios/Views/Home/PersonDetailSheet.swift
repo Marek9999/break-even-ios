@@ -100,7 +100,6 @@ struct PersonDetailSheet: View {
     @State private var dominantColor: Color?
     @State private var cachedAvatarImage: UIImage?
     @Namespace private var olderItemsNamespace
-    @Namespace private var settleTransitionNamespace
     
     // Keyboard pre-warming
     @State private var keyboardPrewarmText = ""
@@ -306,16 +305,14 @@ struct PersonDetailSheet: View {
                                 try await settleAmount(amount: amount, date: date)
                             }
                         )
-                        .navigationTransition(.zoom(sourceID: "settle-button", in: settleTransitionNamespace))
                     } label: {
-                        Text("Settle")
+                        Text("Settle with \(friend.name.components(separatedBy: " ").first ?? friend.name)")
                             .font(.headline)
                             .fontWeight(.semibold)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                     }
                     .buttonStyle(.glassProminent)
-                    .matchedTransitionSource(id: "settle-button", in: settleTransitionNamespace)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 0)
                 }
