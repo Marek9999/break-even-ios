@@ -290,6 +290,18 @@ struct PersonDetailSheet: View {
                 }
                 .padding(.horizontal, 20)
             }
+            .overlay(alignment: .top) {
+                if let color = dominantColor {
+                    LinearGradient(
+                        colors: [color.opacity(0.25), color.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 80)
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
+                }
+            }
             
             .safeAreaBar(edge: .bottom) {
                 if displayAmount > 0 {
@@ -360,18 +372,6 @@ struct PersonDetailSheet: View {
                 // Reset dominant color and cached image when friend changes
                 dominantColor = nil
                 cachedAvatarImage = nil
-            }
-        }
-        .overlay(alignment: .top) {
-            if let color = dominantColor {
-                LinearGradient(
-                    colors: [color.opacity(0.35), color.opacity(0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 80)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
             }
         }
     }

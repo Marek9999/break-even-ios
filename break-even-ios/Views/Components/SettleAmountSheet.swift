@@ -122,6 +122,7 @@ enum AmountTextConfig {
 /// Optimized for performance - no init calculations, uses .onAppear for setup
 struct SettleView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isAmountFocused: Bool
     
     // Core State - initialized in .onAppear, not init
@@ -178,7 +179,7 @@ struct SettleView: View {
                 .padding(.vertical, 20)
                 .background(
                     Capsule()
-                        .fill(isUserPaying ? Color.appDestructive.opacity(0.1) : Color.accent.opacity(0.12))
+                        .fill(isUserPaying ? Color.appDestructive.opacity(0.1) : Color.accent.opacity(0.1))
                 )
                 
                 // Amount input with Liquid Glass text display
@@ -272,11 +273,26 @@ struct SettleView: View {
             Spacer()
             
             // Arrow
-            Text(isUserPaying ? "You Pay" : "You Get")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundStyle(isUserPaying ? Color.appDestructive : Color.accent)
-                .padding(.bottom, 24)
+            HStack(spacing: 4) {
+                if !isUserPaying {
+                    Image (systemName: "chevron.left")
+                        .foregroundStyle(Color.accent)
+                        .font(Font.system(size: 10).bold())
+                        .symbolEffect(.wiggle.byLayer, options: .repeat(.periodic(delay: 0.4)))
+                }
+                Text(isUserPaying ? "Paying" : "Receiving")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(isUserPaying ? Color.appDestructive : Color.accent)
+                    
+                if isUserPaying {
+                    Image (systemName: "chevron.right")
+                        .foregroundStyle(Color.appDestructive)
+                        .font(Font.system(size: 10).bold())
+                        .symbolEffect(.wiggle.byLayer, options: .repeat(.periodic(delay: 0.4)))
+                }
+            }
+            .padding(.bottom, 24)
             
             Spacer()
             
@@ -341,7 +357,12 @@ struct SettleView: View {
     
     // Opacity for glass effect (0.3 when showing placeholder)
     private var glassOpacity: Double {
-        amountText.isEmpty ? 0.3 : 0.8
+        colorScheme == .dark ? amountText.isEmpty ? 0.3 : 0.8 : amountText.isEmpty ? 0.4 : 0.9
+    }
+    
+    // Glass tint color based on color scheme
+    private var glassTintColor: Color {
+        colorScheme == .dark ? Color.text : Color.accent
     }
     
     // Size calculations
@@ -361,7 +382,7 @@ struct SettleView: View {
                 Color.clear
                     .frame(width: currencySize.width, height: currencySize.height)
                     .glassEffect(
-                        .regular.tint(Color.text.opacity(0.3)).interactive(),
+                        .regular.tint(glassTintColor.opacity(0.4)).interactive(),
                         in: GlassTextShape(text: currencySymbol, font: AmountTextConfig.uiFont)
                     )
                 
@@ -369,7 +390,7 @@ struct SettleView: View {
                 Color.clear
                     .frame(width: amountSize.width, height: amountSize.height)
                     .glassEffect(
-                        .regular.tint(Color.text.opacity(glassOpacity)).interactive(),
+                        .regular.tint(glassTintColor.opacity(glassOpacity)).interactive(),
                         in: GlassTextShape(text: displayAmountText, font: AmountTextConfig.uiFont)
                     )
             }
@@ -387,7 +408,6 @@ struct SettleView: View {
                     .keyboardType(.decimalPad)
                     .focused($isAmountFocused)
                     .foregroundStyle(.clear)
-                    .tint(.accent)
                     .font(AmountTextConfig.swiftUIFont)
                     .frame(width: amountSize.width, height: amountSize.height)
             }
@@ -418,13 +438,13 @@ struct SettleView: View {
     
     private var quickAmountButtons: some View {
         HStack(spacing: 8) {
-            QuickAmountButton(label: "50%") {
+            QuickAmountButton(label: "50%", isUserPaying: isUserPaying) {
                 setAmount(maxAmount * 0.5)
             }
-            QuickAmountButton(label: "75%") {
+            QuickAmountButton(label: "75%", isUserPaying: isUserPaying) {
                 setAmount(maxAmount * 0.75)
             }
-            QuickAmountButton(label: "100%") {
+            QuickAmountButton(label: "100%", isUserPaying: isUserPaying) {
                 setAmount(maxAmount)
             }
         }
@@ -491,6 +511,7 @@ struct SettleView: View {
 
 private struct QuickAmountButton: View {
     let label: String
+    let isUserPaying: Bool
     let action: () -> Void
     
     var body: some View {
@@ -498,11 +519,11 @@ private struct QuickAmountButton: View {
             Text(label)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundStyle(.primary)
+                .foregroundStyle(isUserPaying ? Color.appDestructive : Color.accent)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
         }
-        .background(Color.accentSecondary.opacity(0.3))
+        .background(isUserPaying ? Color.appDestructive.opacity(0.12) : Color.accent.opacity(0.12))
         .clipShape(ConcentricRectangle(topLeadingCorner: .concentric(minimum: 6), topTrailingCorner: .concentric(minimum: 6), bottomLeadingCorner: .concentric(minimum: 6), bottomTrailingCorner: .concentric(minimum: 6)))
     }
 }
