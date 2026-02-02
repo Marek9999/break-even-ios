@@ -25,10 +25,14 @@ struct NewSplitSheet: View {
     // Receipt data if scanning
     let receiptResult: ReceiptScanResult?
     
+    // MARK: - State
     @State private var showPersonPicker = false
-    @State private var showSplitMethodPicker = false
     @State private var showPaidByPicker = false
     @State private var showError = false
+    @State private var showReceiptCamera = false
+    @State private var showAddItemSheet = false
+    @State private var showReplaceReceiptAlert = false
+    @FocusState private var isSearchFocused: Bool
     
     // MARK: - Initialization
     
@@ -54,53 +58,52 @@ struct NewSplitSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // Emoji and Title Section
-                    emojiTitleSection
+                VStack(spacing: 20) {
+                    // Row 1: Emoji + Title
+                    emojiTitleRow
                     
-                    // Amount Section
-                    amountSection
+                    // Row 2: Paid By + Date
+                    paidByDateRow
                     
-                    // Date Section
-                    dateSection
+                    // Row 3: Split Method + Currency/Amount
+                    splitMethodAmountRow
                     
-                    // Paid By Section
-                    paidBySection
+                    // Row 4: Friends Section (Search + Scroll)
+                    friendsSection
                     
-                    // Participants Section
-                    participantsSection
+                    // Conditional: Receipt Preview
+                    if viewModel.scannedReceiptImage != nil {
+                        receiptPreviewSection
+                    }
                     
-                    // Split Method Section
-                    splitMethodSection
+                    // Conditional: Itemized List
+                    if viewModel.splitMethod == .byItem && !viewModel.items.isEmpty {
+                        itemizedListSection
+                    }
                     
-                    // Split Breakdown
-                    if !viewModel.participants.isEmpty {
+                    // Split Breakdown (for non-itemized methods)
+                    if !viewModel.participants.isEmpty && viewModel.splitMethod != .byItem {
                         SplitBreakdownView(viewModel: viewModel)
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
+                .padding(.bottom, 80) // Space for bottom bar
+            }
+            .safeAreaInset(edge: .bottom) {
+                bottomActionBar
             }
             .navigationTitle("New Split")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
                     }
                     .disabled(viewModel.isLoading)
-                }
-                
-                ToolbarItem(placement: .confirmationAction) {
-                    if viewModel.isLoading {
-                        ProgressView()
-                    } else {
-                        Button("Save") {
-                            saveSplit()
-                        }
-                        .fontWeight(.semibold)
-                        .disabled(!viewModel.isValid)
-                    }
                 }
             }
             .sheet(isPresented: $showPersonPicker) {
@@ -112,10 +115,37 @@ struct NewSplitSheet: View {
             }
             .sheet(isPresented: $showPaidByPicker) {
                 PaidByPickerSheet(
-                    friends: viewModel.participants,
+                    allFriends: allFriends,
                     selfFriend: selfFriend,
-                    selectedFriend: $viewModel.paidBy
+                    selectedFriend: $viewModel.paidBy,
+                    onSelect: { friend in
+                        // Add the payer to participants if not already included
+                        if !viewModel.participants.contains(where: { $0.id == friend.id }) {
+                            viewModel.addParticipant(friend)
+                        }
+                    }
                 )
+            }
+            .sheet(isPresented: $showReceiptCamera) {
+                ReceiptCameraView { result in
+                    handleReceiptScanned(result)
+                }
+            }
+            .sheet(isPresented: $showAddItemSheet) {
+                AddItemSheet(
+                    currencyCode: viewModel.currency,
+                    onAdd: { name, amount in
+                        viewModel.addItem(name: name, amount: amount)
+                    }
+                )
+            }
+            .alert("Replace Receipt?", isPresented: $showReplaceReceiptAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Replace", role: .destructive) {
+                    showReceiptCamera = true
+                }
+            } message: {
+                Text("Scanning a new receipt will replace the current receipt and all itemized items.")
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK") { }
@@ -143,32 +173,19 @@ struct NewSplitSheet: View {
         
         // Apply receipt data if available
         if let receipt = receiptResult {
-            viewModel.title = receipt.title.isEmpty ? "Receipt" : receipt.title
-            viewModel.totalAmount = receipt.total
-            viewModel.emoji = "🧾"
-            viewModel.scannedReceiptImage = receipt.image
-            
-            // Convert receipt items to split items
-            viewModel.items = receipt.items.map { item in
-                SplitItem(name: item.name, amount: item.amount)
-            }
-            
-            // Always default to "by item" split method when scanning a receipt
-            viewModel.splitMethod = .byItem
-            
-            // Debug logging
-            print("=== Receipt Data Applied to ViewModel ===")
-            print("Title: \(viewModel.title)")
-            print("Total: \(viewModel.totalAmount)")
-            print("Items count: \(viewModel.items.count)")
-            print("Split method: \(viewModel.splitMethod)")
-            print("=========================================")
+            viewModel.replaceReceiptData(from: receipt)
         }
         
         // Set default currency (already set in ViewModel init, but ensure it's consistent)
         if viewModel.currency.isEmpty {
             viewModel.currency = userDefaultCurrency
         }
+    }
+    
+    // MARK: - Handle Receipt Scanned
+    
+    private func handleReceiptScanned(_ result: ReceiptScanResult) {
+        viewModel.replaceReceiptData(from: result)
     }
     
     // MARK: - Save
@@ -196,193 +213,346 @@ struct NewSplitSheet: View {
         }
     }
     
-    // MARK: - Emoji & Title Section
+    // MARK: - Row 1: Emoji & Title Row
     
-    private var emojiTitleSection: some View {
-        VStack(spacing: 12) {
+    private var emojiTitleRow: some View {
+        HStack(spacing: 12) {
+            // Emoji picker
             EmojiTextField(text: $viewModel.emoji)
+                .frame(width: 56, height: 56)
+                
             
-            TextField("What's this for?", text: $viewModel.title)
+            // Title text field
+            TextField("Split Name", text: $viewModel.title)
                 .font(.title2)
                 .fontWeight(.semibold)
-                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(.background.secondary)
+                .clipShape(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
         }
-        .padding()
-        .background(Color.secondary.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
     
-    // MARK: - Amount Section
+    // MARK: - Row 2: Paid By + Date Row
     
-    private var amountSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var paidByDateRow: some View {
+        VStack(spacing: 12) {
+            // Paid by label and picker
+            
+            Text("paid by:")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
             HStack {
-                Text("Total Amount")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                
+                HStack(spacing: 8) {
+                    Button {
+                        showPaidByPicker = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            if let payer = viewModel.paidBy {
+                                PaidByAvatar(friend: payer, size: 28)
+                                
+                                Text(payer.displayName)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.primary)
+                            } else {
+                                Text("Select")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.background.secondary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
                 
                 Spacer()
                 
-                // Currency selector button
-                CurrencyButton(selectedCurrency: $viewModel.currency)
+                // Date picker
+                DatePicker("", selection: $viewModel.date, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
             }
-            
-            HStack {
-                CurrencySymbolView(currencyCode: viewModel.currency)
+        }
+    }
+    
+    // MARK: - Row 3: Split Method + Amount Row
+    
+    private var splitMethodAmountRow: some View {
+        HStack(alignment: .top, spacing: 16) {
+            // Left side: Split method selector + "Total" label
+            VStack(alignment: .leading, spacing: 8) {
+                SplitMethodPicker(selectedMethod: $viewModel.splitMethod)
                 
-                TextField("0.00", value: $viewModel.totalAmount, format: .number.precision(.fractionLength(2)))
-                    .font(.title)
-                    .fontWeight(.semibold)
-                    .keyboardType(.decimalPad)
-            }
-            .padding()
-            .background(Color.secondary.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
-    
-    // MARK: - Date Section
-    
-    private var dateSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Date")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            DatePicker("", selection: $viewModel.date, displayedComponents: .date)
-                .labelsHidden()
-        }
-    }
-    
-    // MARK: - Paid By Section
-    
-    private var paidBySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Paid By")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            Button {
-                showPaidByPicker = true
-            } label: {
-                HStack {
-                    if let payer = viewModel.paidBy {
-                        Text(payer.initials)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.accentColor)
-                            .clipShape(Circle())
-                        
-                        Text(payer.displayName)
-                            .font(.body)
-                    } else {
-                        Text("Select who paid")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color.secondary.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-        }
-    }
-    
-    // MARK: - Participants Section
-    
-    private var participantsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Split Between")
+                Text("Total")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            // Right side: Currency + Amount
+            VStack(alignment: .trailing, spacing: 8) {
+                CurrencyButton(selectedCurrency: $viewModel.currency)
+                
+                HStack(spacing: 4) {
+                    CurrencySymbolView(currencyCode: viewModel.currency)
+                        .font(.title2)
+                    
+                    TextField("0.00", value: $viewModel.totalAmount, format: .number.precision(.fractionLength(2)))
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(minWidth: 80)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Row 4: Friends Section
+    
+    private var friendsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Inline search
+            InlineFriendSearch(
+                availableFriends: selectableFriends,
+                selectedFriends: $viewModel.participants
+            )
+            
+            // Selected friends horizontal scroll
+            if !viewModel.participants.isEmpty {
+                SelectedFriendsScroll(
+                    friends: viewModel.participants,
+                    selfFriend: selfFriend,
+                    onRemove: { friend in
+                        viewModel.removeParticipant(friend)
+                        // Clear paidBy if the removed friend was the payer
+                        if viewModel.paidBy?.id == friend.id {
+                            viewModel.paidBy = nil
+                        }
+                    },
+                    onAddMore: {
+                        showPersonPicker = true
+                    }
+                )
+            }
+        }
+    }
+    
+    // MARK: - Receipt Preview Section
+    
+    @ViewBuilder
+    private var receiptPreviewSection: some View {
+        if let image = viewModel.scannedReceiptImage {
+            ReceiptPreviewRow(
+                image: image,
+                onRemove: {
+                    withAnimation {
+                        viewModel.clearReceipt()
+                    }
+                }
+            )
+        }
+    }
+    
+    // MARK: - Itemized List Section
+    
+    private var itemizedListSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Text("Items")
+                    .font(.headline)
                 
                 Spacer()
                 
                 Button {
-                    showPersonPicker = true
+                    showAddItemSheet = true
                 } label: {
                     Label("Add", systemImage: "plus")
                         .font(.subheadline)
+                        .fontWeight(.medium)
                 }
             }
             
-            if viewModel.participants.isEmpty {
-                Text("No participants added")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(viewModel.participants, id: \.id) { friend in
-                            ParticipantChip(
-                                friend: friend,
-                                onRemove: {
-                                    viewModel.removeParticipant(friend)
-                                }
-                            )
+            // Items list
+            ForEach(viewModel.items) { item in
+                ExpandableItemRow(
+                    item: item,
+                    participants: viewModel.participants,
+                    currencyCode: viewModel.currency,
+                    onToggleAssignment: { friend in
+                        viewModel.toggleItemAssignment(item: item, friend: friend)
+                    },
+                    onRemove: {
+                        withAnimation {
+                            viewModel.removeItem(item)
                         }
                     }
-                }
+                )
             }
+            
+            // Items total
+            HStack {
+                Text("Items Total")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                Text(viewModel.itemsTotal.asCurrency(code: viewModel.currency))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+            }
+            .padding(.top, 8)
         }
     }
     
-    // MARK: - Split Method Section
+    // MARK: - Bottom Action Bar
     
-    private var splitMethodSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Split Method")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            SplitMethodPicker(selectedMethod: $viewModel.splitMethod)
+    private var bottomActionBar: some View {
+        GlassEffectContainer(spacing: 20) {
+            HStack(spacing: 12) {
+                // Scan receipt button (icon only)
+                Button {
+                    if viewModel.scannedReceiptImage != nil {
+                        showReplaceReceiptAlert = true
+                    } else {
+                        showReceiptCamera = true
+                    }
+                } label: {
+                    Image(systemName: "doc.text.viewfinder")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.accent)
+                        .frame(width: 52, height: 52)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                
+                // Add Split button (main action)
+                Button {
+                    saveSplit()
+                } label: {
+                    HStack(spacing: 8) {
+                        if viewModel.isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Add Split")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(viewModel.isValid ? Color.accentColor : Color.secondary)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(!viewModel.isValid || viewModel.isLoading)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
+        .background(.ultraThinMaterial)
     }
 }
 
-// MARK: - Participant Chip
+// MARK: - Paid By Avatar
 
-struct ParticipantChip: View {
+private struct PaidByAvatar: View {
     let friend: ConvexFriend
-    let onRemove: () -> Void
+    let size: CGFloat
     
     var body: some View {
-        HStack(spacing: 6) {
-            Text(friend.initials)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(Color.accentColor)
-                .clipShape(Circle())
-            
-            Text(friend.displayName)
-                .font(.subheadline)
-            
-            if !friend.isSelf {
-                Button {
-                    onRemove()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+        if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
+            AsyncImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                initialsView
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            initialsView
+        }
+    }
+    
+    private var initialsView: some View {
+        Text(friend.initials)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Color.accentColor)
+            .clipShape(Circle())
+    }
+}
+
+// MARK: - Add Item Sheet
+
+struct AddItemSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    let currencyCode: String
+    let onAdd: (String, Double) -> Void
+    
+    @State private var itemName = ""
+    @State private var itemAmount: Double = 0
+    
+    private var isValid: Bool {
+        !itemName.isEmpty && itemAmount > 0
+    }
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Item Details") {
+                    TextField("Item name", text: $itemName)
+                    
+                    HStack {
+                        Text("Amount")
+                        Spacer()
+                        TextField("0.00", value: $itemAmount, format: .currency(code: currencyCode))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+            .navigationTitle("Add Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        onAdd(itemName, itemAmount)
+                        dismiss()
+                    }
+                    .disabled(!isValid)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.1))
-        .clipShape(Capsule())
+        .presentationDetents([.medium])
     }
 }
 
@@ -391,48 +561,76 @@ struct ParticipantChip: View {
 struct PaidByPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     
-    let friends: [ConvexFriend]
+    let allFriends: [ConvexFriend]
     let selfFriend: ConvexFriend?
     @Binding var selectedFriend: ConvexFriend?
+    let onSelect: (ConvexFriend) -> Void
     
+    @State private var searchText = ""
+    
+    /// All available options including self
     private var allOptions: [ConvexFriend] {
-        var options = friends
+        var options = allFriends
         if let self_ = selfFriend, !options.contains(where: { $0.id == self_.id }) {
             options.insert(self_, at: 0)
         }
         return options
     }
     
+    /// Filtered options based on search
+    private var filteredOptions: [ConvexFriend] {
+        if searchText.isEmpty {
+            return allOptions
+        }
+        return allOptions.filter { friend in
+            friend.name.localizedCaseInsensitiveContains(searchText) ||
+            (friend.email?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             List {
-                ForEach(allOptions, id: \.id) { friend in
-                    Button {
-                        selectedFriend = friend
-                        dismiss()
-                    } label: {
-                        HStack {
-                            Text(friend.initials)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Color.accentColor)
-                                .clipShape(Circle())
-                            
-                            Text(friend.displayName)
-                                .foregroundStyle(.primary)
-                            
-                            Spacer()
-                            
-                            if selectedFriend?.id == friend.id {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.accent)
+                if filteredOptions.isEmpty {
+                    ContentUnavailableView(
+                        "No Results",
+                        systemImage: "magnifyingglass",
+                        description: Text("No people match \"\(searchText)\"")
+                    )
+                } else {
+                    ForEach(filteredOptions, id: \.id) { friend in
+                        Button {
+                            selectedFriend = friend
+                            onSelect(friend)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                PaidByPickerAvatar(friend: friend, size: 36)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(friend.displayName)
+                                        .foregroundStyle(.primary)
+                                    
+                                    if let email = friend.email {
+                                        Text(email)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                if selectedFriend?.id == friend.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.accent)
+                                        .fontWeight(.semibold)
+                                }
                             }
                         }
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search people")
             .navigationTitle("Who Paid?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -443,7 +641,39 @@ struct PaidByPickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+}
+
+// MARK: - Paid By Picker Avatar
+
+private struct PaidByPickerAvatar: View {
+    let friend: ConvexFriend
+    let size: CGFloat
+    
+    var body: some View {
+        if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
+            AsyncImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                initialsView
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            initialsView
+        }
+    }
+    
+    private var initialsView: some View {
+        Text(friend.initials)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Color.accentColor)
+            .clipShape(Circle())
     }
 }
 

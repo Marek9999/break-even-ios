@@ -220,14 +220,14 @@ private struct EmojiTextFieldRepresentable: UIViewRepresentable {
 struct EmojiTextField: View {
     @Binding var text: String
     var placeholder: String = "🍗"
-    var size: CGFloat = 44
+    var size: CGFloat = 54
     
     var body: some View {
         ZStack {
             // Placeholder emoji with reduced opacity
             if text.isEmpty {
                 Text(placeholder)
-                    .font(.system(size: size * 0.6))
+                    .font(.system(size: size * 0.5))
                     .opacity(0.5)
                     .allowsHitTesting(false)
             }
@@ -240,7 +240,8 @@ struct EmojiTextField: View {
             )
         }
         .frame(width: size, height: size)
-        .glassEffect(.regular.tint(Color.accentSecondary.opacity(0.3)), in: .rect(cornerRadius: 12))
+        .background(Color.accent.opacity(0.2))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 

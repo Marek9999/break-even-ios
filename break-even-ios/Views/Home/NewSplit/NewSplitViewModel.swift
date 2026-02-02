@@ -314,6 +314,42 @@ class NewSplitViewModel {
         }
     }
     
+    /// Clear receipt data and associated items
+    func clearReceipt() {
+        scannedReceiptImage = nil
+        receiptFileId = nil
+        items = []
+        
+        // Reset split method if it was by-item
+        if splitMethod == .byItem {
+            splitMethod = .equal
+        }
+    }
+    
+    /// Replace existing receipt data with new scan result
+    func replaceReceiptData(from result: ReceiptScanResult) {
+        // Clear existing receipt
+        receiptFileId = nil
+        
+        // Apply new data
+        title = result.title.isEmpty ? "Receipt" : result.title
+        totalAmount = result.total
+        emoji = "🧾"
+        scannedReceiptImage = result.image
+        
+        // Convert receipt items to split items
+        items = result.items
+        
+        // Always default to "by item" split method when scanning a receipt
+        splitMethod = .byItem
+        
+        print("=== Receipt Data Replaced ===")
+        print("Title: \(title)")
+        print("Total: \(totalAmount)")
+        print("Items count: \(items.count)")
+        print("=============================")
+    }
+    
     // MARK: - Save Receipt to Photo Library
     
     func saveReceiptToPhotoLibrary(image: UIImage) async throws {
