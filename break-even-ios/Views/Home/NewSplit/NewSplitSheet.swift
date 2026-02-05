@@ -65,10 +65,13 @@ struct NewSplitSheet: View {
                     // Row 2: Paid By + Date
                     paidByDateRow
                     
-                    // Row 3: Split Method + Currency/Amount
-                    splitMethodAmountRow
+                    // Row 3: Split Method Selector
+                    splitMethodRow
                     
-                    // Row 4: Friends Section (Search + Scroll)
+                    // Row 4: Currency/Amount
+                    amountRow
+                    
+                    // Row 5: Friends Section (Search + Scroll)
                     friendsSection
                     
                     // Conditional: Receipt Preview
@@ -288,18 +291,20 @@ struct NewSplitSheet: View {
         }
     }
     
-    // MARK: - Row 3: Split Method + Amount Row
+    // MARK: - Row 3: Split Method Selector
     
-    private var splitMethodAmountRow: some View {
+    private var splitMethodRow: some View {
+        SplitMethodSelector(selectedMethod: $viewModel.splitMethod)
+            .frame(height: 64)
+    }
+    
+    // MARK: - Row 4: Amount Row
+    
+    private var amountRow: some View {
         HStack(alignment: .top, spacing: 16) {
-            // Left side: Split method selector + "Total" label
-            VStack(alignment: .leading, spacing: 8) {
-                SplitMethodPicker(selectedMethod: $viewModel.splitMethod)
-                
-                Text("Total")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Total")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             
             Spacer()
             
