@@ -59,9 +59,6 @@ struct SplitMethodSelector: View {
     }
     
     var body: some View {
-        // Trailing margin = the scroll offset where last item snaps
-        let trailingMargin = lastItemSnapOffset
-        
         // Base layer defines the component size
         Color.clear
             .frame(maxWidth: .infinity, maxHeight: 64)
@@ -69,28 +66,33 @@ struct SplitMethodSelector: View {
             .clipShape(.capsule)
             // ScrollView overlay - doesn't influence parent size
             .overlay {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: itemSpacing) {
-                        ForEach(NewSplitMethod.allCases) { method in
-                            Text(method.rawValue)
-                                .foregroundStyle(Color.text.opacity(method == selectedMethod ? 0.2 : 0.6))
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .id(method)
-                                .background {
-                                    GeometryReader { itemGeo in
-                                        Color.clear
-                                            .preference(key: ItemWidthPreferenceKey.self, value: [method: itemGeo.size.width])
+                GeometryReader { geo in
+                    // Trailing margin = space needed so last item can snap to leading edge
+                    // Formula: containerWidth - lastItemWidth - (2 * horizontalPadding)
+                    let trailingMargin = max(0, geo.size.width - lastItemWidth - (horizontalPadding * 2))
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: itemSpacing) {
+                            ForEach(NewSplitMethod.allCases) { method in
+                                Text(method.rawValue)
+                                    .foregroundStyle(Color.text.opacity(0.6))
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .id(method)
+                                    .background {
+                                        GeometryReader { itemGeo in
+                                            Color.clear
+                                                .preference(key: ItemWidthPreferenceKey.self, value: [method: itemGeo.size.width])
+                                        }
                                     }
-                                }
+                            }
                         }
+                        .scrollTargetLayout()
+                        .padding(.horizontal, horizontalPadding)
                     }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, horizontalPadding)
-                }
-                .scrollPosition(id: $scrolledMethodID, anchor: .leading)
-                .scrollTargetBehavior(.viewAligned)
-                .contentMargins(.trailing, trailingMargin, for: .scrollContent)
+                    .scrollPosition(id: $scrolledMethodID, anchor: .leading)
+                    .scrollTargetBehavior(.viewAligned)
+                    .contentMargins(.trailing, trailingMargin, for: .scrollContent)
                 .mask {
                     ZStack {
                         LinearGradient(colors: [.black, .black, .black, .black, .black, .black, .clear, .clear], startPoint: .leading, endPoint: .trailing)
@@ -124,6 +126,8 @@ struct SplitMethodSelector: View {
                 }
                 .onPreferenceChange(ItemWidthPreferenceKey.self) { widths in
                     itemWidths = widths
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             // Glass capsule overlay
