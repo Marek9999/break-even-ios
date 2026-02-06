@@ -28,6 +28,11 @@ struct SplitMethodSelector: View {
     // iOS 18+ scroll offset tracking (includes rubber-band)
     @State private var scrollOffset: CGFloat = 0
     
+    // Description display state
+    @State private var isShowingDescription: Bool = false
+    @State private var descriptionTask: Task<Void, Never>? = nil
+    @GestureState private var isPressed: Bool = false
+    
     private let horizontalPadding: CGFloat = 30
     private let itemSpacing: CGFloat = 60
     private let capsulePadding: CGFloat = 44
@@ -79,6 +84,8 @@ struct SplitMethodSelector: View {
                                     .font(.subheadline)
                                     .fontWeight(.medium)
                                     .id(method)
+                                    .opacity(isShowingDescription ? 0 : 1)
+                                    .animation(.easeInOut(duration: 0.3), value: isShowingDescription)
                                     .background {
                                         GeometryReader { itemGeo in
                                             Color.clear
@@ -87,6 +94,8 @@ struct SplitMethodSelector: View {
                                     }
                             }
                         }
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
                         .scrollTargetLayout()
                         .padding(.horizontal, horizontalPadding)
                     }
@@ -95,7 +104,7 @@ struct SplitMethodSelector: View {
                     .contentMargins(.trailing, trailingMargin, for: .scrollContent)
                 .mask {
                     ZStack {
-                        LinearGradient(colors: [.black, .black, .black, .black, .black, .black, .clear, .clear], startPoint: .leading, endPoint: .trailing)
+                        LinearGradient(colors: [.black, .black, .black, .black, .black, .clear, .clear, .clear], startPoint: .leading, endPoint: .trailing)
                         
                         HStack {
                             Capsule()
@@ -109,14 +118,16 @@ struct SplitMethodSelector: View {
                     }
                     .compositingGroup()
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 5)
-                        .onChanged { _ in }
-                )
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     geometry.contentOffset.x
                 } action: { _, newOffset in
                     scrollOffset = newOffset
+                }
+                .onScrollPhaseChange { oldPhase, newPhase in
+                    if newPhase == .idle {
+                        // Scroll ended - start timer to show description
+                        startDescriptionTimer()
+                    }
                 }
                 .onChange(of: scrolledMethodID) { _, newValue in
                     if let newMethod = newValue {
@@ -135,6 +146,8 @@ struct SplitMethodSelector: View {
                 Color.clear
                     .frame(width: selectedItemWidth + capsulePadding, height: 52)
                     .glassEffect(.clear.interactive(true), in: .capsule)
+                    .scaleEffect(isPressed ? 1.1 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPressed)
                     .animation(.smooth(duration: 0.25), value: selectedItemWidth)
                     .padding(.horizontal, 8)
             }
@@ -167,8 +180,52 @@ struct SplitMethodSelector: View {
                     }
                 }
             }
+            // Description overlay - shows after 1 second of inactivity
+            .overlay(alignment: .trailing) {
+                Text(selectedMethod.description)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.text.opacity(0.6))
+                    .padding(.trailing, 24)
+                    .opacity(isShowingDescription ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: isShowingDescription)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(Capsule())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isPressed) { _, state, _ in
+                        state = true
+                    }
+            )
+            .onChange(of: isPressed) { _, pressing in
+                if pressing {
+                    // Touch down - hide description
+                    descriptionTask?.cancel()
+                    descriptionTask = nil
+                    if isShowingDescription {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isShowingDescription = false
+                        }
+                    }
+                } else {
+                    // Touch up - restart timer
+                    startDescriptionTimer()
+                }
+            }
         .onAppear {
             scrolledMethodID = selectedMethod
+            startDescriptionTimer()
+        }
+    }
+    
+    private func startDescriptionTimer() {
+        descriptionTask?.cancel()
+        descriptionTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isShowingDescription = true
+            }
         }
     }
 }
