@@ -67,7 +67,7 @@ struct CurrencyButton: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.secondary.opacity(0.15))
+            .background(.background.secondary)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -145,7 +145,7 @@ struct SplitMethodSelector: View {
             .overlay(alignment: .leading) {
                 Color.clear
                     .frame(width: selectedItemWidth + capsulePadding, height: 52)
-                    .glassEffect(.clear.interactive(true), in: .capsule)
+                    .glassEffect(.clear, in: .capsule)
                     .scaleEffect(isPressed ? 1.1 : 1.0)
                     .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPressed)
                     .animation(.smooth(duration: 0.25), value: selectedItemWidth)

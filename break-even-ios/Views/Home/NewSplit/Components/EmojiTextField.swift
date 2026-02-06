@@ -110,6 +110,7 @@ final class UIEmojiTextField: UITextField {
 /// The raw UIViewRepresentable wrapper for the emoji text field
 private struct EmojiTextFieldRepresentable: UIViewRepresentable {
     @Binding var text: String
+    @Binding var isFocused: Bool
     var placeholder: String = "🍗"
     var fontSize: CGFloat = 28
     
@@ -128,6 +129,13 @@ private struct EmojiTextFieldRepresentable: UIViewRepresentable {
         // Only update if the text has changed externally
         if uiView.text != text {
             uiView.text = text
+        }
+        
+        // Sync focus state
+        if isFocused && !uiView.isFirstResponder {
+            uiView.becomeFirstResponder()
+        } else if !isFocused && uiView.isFirstResponder {
+            uiView.resignFirstResponder()
         }
     }
     
@@ -211,6 +219,18 @@ private struct EmojiTextFieldRepresentable: UIViewRepresentable {
             textField.resignFirstResponder()
             return true
         }
+        
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.isFocused = true
+            }
+        }
+        
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.isFocused = false
+            }
+        }
     }
 }
 
@@ -219,6 +239,7 @@ private struct EmojiTextFieldRepresentable: UIViewRepresentable {
 /// A styled text field that only accepts emoji input using the native iOS emoji keyboard
 struct EmojiTextField: View {
     @Binding var text: String
+    @Binding var isFocused: Bool
     var placeholder: String = "🍗"
     var size: CGFloat = 54
     
@@ -235,13 +256,25 @@ struct EmojiTextField: View {
             // Actual text field (transparent when showing placeholder)
             EmojiTextFieldRepresentable(
                 text: $text,
+                isFocused: $isFocused,
                 placeholder: "",
                 fontSize: size * 0.6
             )
         }
         .frame(width: size, height: size)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isFocused = true
+        }
         .background(Color.accent.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+    
+    init(text: Binding<String>, isFocused: Binding<Bool>? = nil, placeholder: String = "🍗", size: CGFloat = 54) {
+        self._text = text
+        self._isFocused = isFocused ?? .constant(false)
+        self.placeholder = placeholder
+        self.size = size
     }
 }
 
