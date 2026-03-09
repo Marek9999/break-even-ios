@@ -7,107 +7,161 @@
 
 import SwiftUI
 
-/// Row displaying receipt thumbnail with remove option
+/// Pill-shaped bar showing receipt photo info, with optional total mismatch warning.
+/// This view requires an image -- callers should only show it when scannedReceiptImage != nil.
 struct ReceiptPreviewRow: View {
     let image: UIImage
-    let onRemove: () -> Void
-    let onTap: (() -> Void)?
+    let showMismatchWarning: Bool
+    var itemsTotal: Double = 0
+    var splitTotal: Double = 0
+    var currencyCode: String = "USD"
+    let onScanReceipt: () -> Void
+    let onDeletePhoto: () -> Void
+    let onScanNewReceipt: () -> Void
+    let onTapPhoto: () -> Void
     
-    @State private var showFullImage = false
-    
-    init(image: UIImage, onRemove: @escaping () -> Void, onTap: (() -> Void)? = nil) {
-        self.image = image
-        self.onRemove = onRemove
-        self.onTap = onTap
+    private var mismatchText: String {
+        let diff = abs(itemsTotal - splitTotal)
+        let diffFormatted = diff.asCurrency(code: currencyCode)
+        if itemsTotal > splitTotal {
+            return "Items exceed total by \(diffFormatted)"
+        } else {
+            return "Items short of total by \(diffFormatted)"
+        }
     }
     
     var body: some View {
+        receiptPhotoBar
+    }
+    
+    // MARK: - Receipt Photo Bar
+    
+    private var receiptPhotoBar: some View {
         HStack(spacing: 12) {
-            // Receipt label
-            Text("Receipt")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Receipt Photo")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.text)
+                
+                if showMismatchWarning {
+                    Text(mismatchText)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
             
             Spacer()
             
-            // Thumbnail
             Button {
-                if let action = onTap {
-                    action()
-                } else {
-                    showFullImage = true
-                }
+                onTapPhoto()
             } label: {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 56, height: 56)
+                    .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay {
                         RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                            .strokeBorder(.text.opacity(0.2), lineWidth: 1)
                     }
-            }
-            .buttonStyle(.plain)
-            
-            // Remove button
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
-        .sheet(isPresented: $showFullImage) {
-            ReceiptFullImageView(image: image)
-        }
+        .background(.background.secondary.opacity(0.6))
+        .clipShape(Capsule())
     }
+    
 }
 
-// MARK: - Receipt Full Image View
+// MARK: - Items Total Mismatch Bar
 
-struct ReceiptFullImageView: View {
-    @Environment(\.dismiss) private var dismiss
-    let image: UIImage
+/// Standalone pill-shaped warning bar for when items total doesn't match the split total.
+/// Used in the by-item section when no receipt image exists.
+struct ItemsTotalMismatchBar: View {
+    let itemsTotal: Double
+    let splitTotal: Double
+    let currencyCode: String
+    
+    private var mismatchText: String {
+        let diff = abs(itemsTotal - splitTotal)
+        let diffFormatted = diff.asCurrency(code: currencyCode)
+        if itemsTotal > splitTotal {
+            return "Items exceed total by \(diffFormatted)"
+        } else {
+            return "Items short of total by \(diffFormatted)"
+        }
+    }
     
     var body: some View {
-        NavigationStack {
-            GeometryReader { geometry in
-                ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
-                }
-            }
-            .background(Color.black)
-            .navigationTitle("Receipt")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.orange)
+            
+            Text(mismatchText)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            
+            Spacer()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.background.secondary.opacity(0.6))
+        .clipShape(Capsule())
     }
 }
 
 // MARK: - Preview
 
-#Preview("Receipt Preview Row") {
-    VStack {
-        // Create a sample image for preview
-        if let sampleImage = UIImage(systemName: "doc.text.fill") {
-            ReceiptPreviewRow(
-                image: sampleImage,
-                onRemove: { print("Remove tapped") }
-            )
-            .padding()
-        }
+#Preview("With Photo") {
+    let size = CGSize(width: 200, height: 280)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let img = renderer.image { ctx in
+        UIColor.systemGray5.setFill()
+        ctx.fill(CGRect(origin: .zero, size: size))
     }
+    
+    VStack(spacing: 20) {
+        ReceiptPreviewRow(
+            image: img,
+            showMismatchWarning: false,
+            onScanReceipt: {},
+            onDeletePhoto: {},
+            onScanNewReceipt: {},
+            onTapPhoto: {}
+        )
+        
+        ReceiptPreviewRow(
+            image: img,
+            showMismatchWarning: true,
+            itemsTotal: 52.47,
+            splitTotal: 50.00,
+            currencyCode: "USD",
+            onScanReceipt: {},
+            onDeletePhoto: {},
+            onScanNewReceipt: {},
+            onTapPhoto: {}
+        )
+    }
+    .padding()
+}
+
+#Preview("Mismatch Bar") {
+    VStack(spacing: 20) {
+        ItemsTotalMismatchBar(
+            itemsTotal: 52.47,
+            splitTotal: 50.00,
+            currencyCode: "USD"
+        )
+        
+        ItemsTotalMismatchBar(
+            itemsTotal: 42.00,
+            splitTotal: 50.00,
+            currencyCode: "USD"
+        )
+    }
+    .padding()
 }

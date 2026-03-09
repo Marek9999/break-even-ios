@@ -10,7 +10,6 @@ import Clerk
 import ConvexMobile
 internal import Combine
 
-/// Alias for backward compatibility
 typealias TransactionDetailView = SplitDetailView
 
 struct SplitDetailView: View {
@@ -19,52 +18,96 @@ struct SplitDetailView: View {
     @Environment(\.convexService) private var convexService
     
     let transaction: EnrichedTransaction
-    let userCurrency: String  // User's default currency for display
+    let userCurrency: String
     
     @State private var detailedTransaction: EnrichedTransaction?
     @State private var isLoading = false
     @State private var showDeleteAlert = false
+    @State private var showEditSheet = false
+    @State private var showPhotoOverlay = false
+    @State private var scrollOffset: CGFloat = -74
+    
+    // Friends data for edit flow
+    @State private var allFriends: [ConvexFriend] = []
+    @State private var selfFriend: ConvexFriend?
+    @State private var friendsSubscription: Task<Void, Never>?
     
     private var displayTransaction: EnrichedTransaction {
         detailedTransaction ?? transaction
     }
     
-    /// Whether the transaction currency differs from user's default
     private var showCurrencyConversion: Bool {
         displayTransaction.currency != userCurrency
     }
     
+    private var transitionProgress: CGFloat {
+        let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
+        return progress
+    }
+    
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Header
+            VStack(alignment: .leading, spacing: 28) {
                 headerSection
+                splitTotalCard
+                splitSummarySection
                 
-                // Amount Card
-                amountCard
-                
-                // Receipt Image (if available)
-                if let receiptUrl = displayTransaction.receiptUrl, let url = URL(string: receiptUrl) {
-                    receiptSection(url: url)
+                if let receiptUrl = displayTransaction.receiptUrl,
+                   let url = URL(string: receiptUrl) {
+                    receiptPhotoSection(url: url)
                 }
                 
-                // Splits Section
-                splitsSection
-                
-                // Items Section (if by-item split)
                 if let items = displayTransaction.items, !items.isEmpty {
-                    itemsSection(items: items)
+                    itemizedListSection(items: items)
                 }
-                
-                // Delete Button
-                deleteButton
             }
-            .padding()
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
         }
-        .navigationTitle("Split Details")
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y
+        } action: { _, newValue in
+            scrollOffset = newValue
+        }
+        .overlay {
+            if showPhotoOverlay,
+               let receiptUrl = displayTransaction.receiptUrl,
+               let url = URL(string: receiptUrl) {
+                receiptPhotoOverlay(url: url)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: showPhotoOverlay)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            loadDetails()
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Text(displayTransaction.emoji)
+                        .font(.system(size: 18))
+                    Text(displayTransaction.title)
+                        .fontWeight(.semibold)
+                }
+                .opacity(transitionProgress >= 0.5 ? 1 : 0)
+                .animation(.smooth(duration: 0.25), value: transitionProgress >= 0.5)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showDeleteAlert = true
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.destructive)
+                        .font(.subheadline)
+                }
+            }
+            ToolbarSpacer(placement: .topBarTrailing)
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.subheadline)
+                }
+            }
         }
         .alert("Delete Split", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
@@ -74,13 +117,364 @@ struct SplitDetailView: View {
         } message: {
             Text("Are you sure you want to delete this split? This cannot be undone.")
         }
+        .sheet(isPresented: $showEditSheet) {
+            NavigationStack {
+                NewSplitSheet(
+                    allFriends: allFriends,
+                    selfFriend: selfFriend,
+                    userDefaultCurrency: userCurrency,
+                    prefilledViewModel: NewSplitViewModel(
+                        from: displayTransaction,
+                        allFriends: allFriends
+                    )
+                )
+            }
+        }
+        .onAppear {
+            loadDetails()
+            subscribeToFriends()
+        }
+        .onDisappear {
+            friendsSubscription?.cancel()
+        }
     }
     
-    // MARK: - Load Details
+    // MARK: - Header
+    
+    private var headerSection: some View {
+        HStack(spacing: 14) {
+            Text(displayTransaction.emoji)
+                .font(.system(size: 32))
+                .frame(width: 64, height: 64)
+                .background(Color.accent.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text(displayTransaction.title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text(displayTransaction.dateValue.formatted(date: .long, time: .omitted))
+                    .font(.subheadline)
+                    .foregroundStyle(.text.opacity(0.6))
+            }
+        }
+        .opacity(transitionProgress < 0.5 ? 1 : 0)
+        .animation(.smooth(duration: 0.25), value: transitionProgress < 0.5)
+        .padding(.top, 12)
+    }
+    
+    // MARK: - Split Total Card
+    
+    private var splitTotalCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Split Total")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.text.opacity(0.6))
+            
+            Text(displayTransaction.formattedAmount)
+                .font(.title)
+                .fontWeight(.semibold)
+            
+            if showCurrencyConversion {
+                Text(displayTransaction.formattedAmount(in: userCurrency))
+                    .font(.title3)
+                    .foregroundStyle(.text.opacity(0.6))
+            }
+            
+            Divider()
+            
+            HStack {
+                Text("Paid by")
+                    .foregroundStyle(.text.opacity(0.6))
+                
+                Spacer()
+                
+                HStack(spacing: 8) {
+                    if let payer = displayTransaction.payer {
+                        payerAvatar(payer)
+                    }
+                    Text(displayTransaction.payerName)
+                        .fontWeight(.medium)
+                }
+            }
+            .padding(.top, 4)
+            .font(.subheadline)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+    }
+    
+    // MARK: - Split Summary
+    
+    private var splitSummarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Split Summary")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.leading)
+            
+            VStack(spacing: 8) {
+                ForEach(Array(displayTransaction.splits.enumerated()), id: \.element.id) { index, split in
+                    splitParticipantRow(split: split)
+                    
+                    if index < displayTransaction.splits.count - 1 {
+                        Divider()
+                            .padding(.leading, 48)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.background.secondary.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+        }
+    }
+    
+    private func splitParticipantRow(split: EnrichedSplit) -> some View {
+        HStack(spacing: 12) {
+            if let friend = split.friend {
+                participantAvatar(friend)
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(width: 32, height: 32)
+            }
+            
+            Text(split.personName)
+                .font(.body)
+                .fontWeight(.medium)
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(split.amount.asCurrency(code: displayTransaction.currency))
+                    .font(.body)
+                    .fontWeight(.medium)
+                
+                if showCurrencyConversion, let rates = displayTransaction.exchangeRates {
+                    let converted = rates.convert(
+                        amount: split.amount,
+                        from: displayTransaction.currency,
+                        to: userCurrency
+                    )
+                    Text(converted.asCurrency(code: userCurrency))
+                        .font(.caption)
+                        .foregroundStyle(.text.opacity(0.6))
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+    
+    // MARK: - Receipt Photo (matches ReceiptPreviewRow capsule style)
+    
+    private func receiptPhotoSection(url: URL) -> some View {
+        HStack(spacing: 12) {
+            Text("Receipt Photo")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.text)
+            
+            Spacer()
+            
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    showPhotoOverlay = true
+                }
+            } label: {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(.text.opacity(0.2), lineWidth: 1)
+                        }
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                        .overlay { ProgressView().scaleEffect(0.6) }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.background.secondary.opacity(0.6))
+        .clipShape(Capsule())
+    }
+    
+    // MARK: - Itemized List (matches NewSplitSheet by-item styling)
+    
+    private func itemizedListSection(items: [ConvexTransactionItem]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 0) {
+                Text("Item")
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+                
+                Spacer(minLength: 12)
+                
+                Text("Qty")
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+                    .frame(width: 44, alignment: .center)
+                
+                Text("Price")
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+                    .frame(width: 80, alignment: .trailing)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            
+            VStack(spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    let isFirst = index == 0
+                    let isLast = index == items.count - 1
+                    
+                    readOnlyItemRow(
+                        item: item,
+                        topRadius: isFirst ? 20 : 8,
+                        bottomRadius: isLast ? 20 : 8
+                    )
+                }
+            }
+        }
+    }
+    
+    private func readOnlyItemRow(
+        item: ConvexTransactionItem,
+        topRadius: CGFloat,
+        bottomRadius: CGFloat
+    ) -> some View {
+        let friends: [ConvexFriend] = item.assignedToIds.compactMap { id in
+            displayTransaction.splits.first(where: { $0.friendId == id })?.friend
+        }
+        let assignedCount = item.assignedToIds.count
+        
+        return VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                Text(item.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.text)
+                    .lineLimit(1)
+                
+                Spacer(minLength: 12)
+                
+                Text("\(item.quantity)")
+                    .font(.subheadline)
+                    .foregroundStyle(.text)
+                    .frame(width: 44, alignment: .center)
+                
+                Text(item.totalPrice.asCurrency(code: displayTransaction.currency))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.text)
+                    .frame(width: 80, alignment: .trailing)
+            }
+            
+            HStack {
+                if assignedCount > 0 {
+                    HStack(spacing: -(24 * 0.4)) {
+                        ForEach(Array(friends.prefix(6)), id: \.id) { friend in
+                            FriendAvatar(friend: friend, size: 24)
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(Color(.systemBackground), lineWidth: 2)
+                                }
+                        }
+                        
+                        if friends.count > 6 {
+                            Text("+\(friends.count - 6)")
+                                .font(.system(size: 24 * 0.38, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, height: 24)
+                                .background(Color(.systemGray5))
+                                .clipShape(Circle())
+                                .overlay {
+                                    Circle()
+                                        .strokeBorder(Color(.systemBackground), lineWidth: 2)
+                                }
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.subheadline)
+                        .foregroundStyle(.text.opacity(0.6))
+                }
+                
+                Spacer()
+                
+                Text(assignedCount > 0 ? "\(assignedCount) people assigned" : "no one assigned")
+                    .font(.caption)
+                    .foregroundStyle(.text.opacity(0.6))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .background(.background.secondary.opacity(0.6))
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: topRadius,
+                bottomLeadingRadius: bottomRadius,
+                bottomTrailingRadius: bottomRadius,
+                topTrailingRadius: topRadius
+            )
+        )
+    }
+    
+    // MARK: - Avatar Helpers
+    
+    private func payerAvatar(_ friend: ConvexFriend) -> some View {
+        FriendAvatar(friend: friend, size: 24)
+    }
+    
+    private func participantAvatar(_ friend: ConvexFriend) -> some View {
+        FriendAvatar(friend: friend, size: 32)
+    }
+    
+    // MARK: - Receipt Photo Overlay (Read-Only)
+    
+    private func receiptPhotoOverlay(url: URL) -> some View {
+        ZStack {
+            Color.black.opacity(0.6)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showPhotoOverlay = false
+                    }
+                }
+            
+            VStack(spacing: 24) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 400)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(radius: 20)
+                } placeholder: {
+                    ProgressView()
+                }
+            }
+            .padding(24)
+        }
+    }
+    
+    // MARK: - Data Loading
     
     private func loadDetails() {
         Task {
-            // Use subscribe + first value pattern since ConvexMobile has no query() method
             let subscription = convexService.client.subscribe(
                 to: "transactions:getTransactionDetail",
                 with: ["transactionId": transaction._id],
@@ -89,8 +483,8 @@ struct SplitDetailView: View {
             .replaceError(with: nil)
             .values
             
-            var iterator = subscription.makeAsyncIterator()
-            if let detail = await iterator.next() {
+            for await detail in subscription {
+                if Task.isCancelled { break }
                 await MainActor.run {
                     self.detailedTransaction = detail
                 }
@@ -98,162 +492,27 @@ struct SplitDetailView: View {
         }
     }
     
-    // MARK: - Header Section
-    
-    private var headerSection: some View {
-        VStack(spacing: 12) {
-            Text(displayTransaction.emoji)
-                .font(.system(size: 60))
+    private func subscribeToFriends() {
+        guard let clerkId = clerk.user?.id else { return }
+        friendsSubscription?.cancel()
+        
+        friendsSubscription = Task {
+            let subscription = convexService.client.subscribe(
+                to: "friends:listFriends",
+                with: ["clerkId": clerkId],
+                yielding: [ConvexFriend].self
+            )
+            .replaceError(with: [])
+            .values
             
-            Text(displayTransaction.title)
-                .font(.title2)
-                .fontWeight(.bold)
-                .multilineTextAlignment(.center)
-            
-            Text(displayTransaction.dateValue.formatted(date: .long, time: .omitted))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-    
-    // MARK: - Amount Card
-    
-    private var amountCard: some View {
-        VStack(spacing: 8) {
-            Text("Total")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            // Show amount in original transaction currency
-            Text(displayTransaction.formattedAmount)
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            // If transaction currency differs from user's default, show converted amount
-            if showCurrencyConversion {
-                Text("(\(displayTransaction.formattedAmount(in: userCurrency)))")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-            }
-            
-            HStack {
-                Text("Paid by")
-                    .foregroundStyle(.secondary)
-                Text(displayTransaction.payerName)
-                    .fontWeight(.medium)
-            }
-            .font(.subheadline)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-        .background(Color.secondary.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-    
-    // MARK: - Receipt Section
-    
-    private func receiptSection(url: URL) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Receipt")
-                .font(.headline)
-            
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondary.opacity(0.1))
-                    .frame(height: 200)
-                    .overlay {
-                        ProgressView()
-                    }
-            }
-        }
-    }
-    
-    // MARK: - Splits Section
-    
-    private var splitsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Split Breakdown")
-                .font(.headline)
-            
-            VStack(spacing: 8) {
-                ForEach(displayTransaction.splits, id: \.id) { split in
-                    SplitRow(
-                        split: split,
-                        currencyCode: displayTransaction.currency,
-                        showConversion: showCurrencyConversion,
-                        userCurrency: userCurrency,
-                        exchangeRates: displayTransaction.exchangeRates
-                    )
+            for await friends in subscription {
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    self.allFriends = friends
+                    self.selfFriend = friends.first(where: { $0.isSelf })
                 }
             }
-            .padding()
-            .background(Color.secondary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-    }
-    
-    // MARK: - Items Section
-    
-    private func itemsSection(items: [ConvexTransactionItem]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Items")
-                .font(.headline)
-            
-            VStack(spacing: 8) {
-                ForEach(items, id: \.id) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name)
-                                .font(.body)
-                            
-                            if item.quantity > 1 {
-                                Text("Qty: \(item.quantity)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // Show item price in transaction's currency
-                        Text(item.totalPrice.asCurrency(code: displayTransaction.currency))
-                            .font(.body)
-                            .fontWeight(.medium)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    if item.id != items.last?.id {
-                        Divider()
-                    }
-                }
-            }
-            .padding()
-            .background(Color.secondary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
-    
-    // MARK: - Delete Button
-    
-    private var deleteButton: some View {
-        Button(role: .destructive) {
-            showDeleteAlert = true
-        } label: {
-            HStack {
-                Image(systemName: "trash")
-                Text("Delete Split")
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .padding(.top)
     }
     
     // MARK: - Delete Transaction
@@ -275,85 +534,48 @@ struct SplitDetailView: View {
     }
 }
 
-// MARK: - Split Row
+// MARK: - Previews
 
-struct SplitRow: View {
-    let split: EnrichedSplit
-    let currencyCode: String
-    let showConversion: Bool
-    let userCurrency: String
-    let exchangeRates: ExchangeRates?
-    
-    /// Converted amount in user's currency
-    private var convertedAmount: Double {
-        guard let rates = exchangeRates else {
-            return split.amount
-        }
-        return rates.convert(amount: split.amount, from: currencyCode, to: userCurrency)
-    }
-    
-    var body: some View {
-        HStack {
-            // Avatar
-            if let friend = split.friend {
-                Text(friend.initials)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Color.accentColor)
-                    .clipShape(Circle())
-            }
-            
-            // Name
-            Text(split.personName)
-                .font(.body)
-            
-            Spacer()
-            
-            // Amount display
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(split.amount.asCurrency(code: currencyCode))
-                    .font(.body)
-                    .fontWeight(.medium)
-                
-                if showConversion {
-                    Text("(\(convertedAmount.asCurrency(code: userCurrency)))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(.vertical, 4)
+#Preview("USD Split") {
+    NavigationStack {
+        SplitDetailView(
+            transaction: .previewDinner,
+            userCurrency: "USD"
+        )
     }
 }
 
-#Preview {
+#Preview("Foreign Currency") {
     NavigationStack {
         SplitDetailView(
-            transaction: EnrichedTransaction(
-                _id: "1",
-                createdById: "user1",
-                paidById: "friend1",
-                title: "Team Dinner",
-                emoji: "🍕",
-                description: nil,
-                totalAmount: 156.80,
-                currency: "EUR",
-                splitMethod: "equal",
-                receiptFileId: nil,
-                items: nil,
-                exchangeRates: ExchangeRates(
-                    baseCurrency: "USD",
-                    rates: CurrencyRates.fallback,
-                    fetchedAt: Date().timeIntervalSince1970 * 1000
-                ),
-                date: Date().timeIntervalSince1970 * 1000,
-                createdAt: Date().timeIntervalSince1970 * 1000,
-                payer: nil,
-                splits: [],
-                receiptUrl: nil
-            ),
+            transaction: .previewEuroTrip,
+            userCurrency: "USD"
+        )
+    }
+}
+
+#Preview("5 Participants + Receipt + Items") {
+    NavigationStack {
+        SplitDetailView(
+            transaction: .previewFullReceipt,
+            userCurrency: "CAD"
+        )
+    }
+}
+
+#Preview("Receipt Only") {
+    NavigationStack {
+        SplitDetailView(
+            transaction: .previewReceiptOnly,
+            userCurrency: "USD"
+        )
+    }
+}
+
+#Preview("Items Only") {
+    NavigationStack {
+        SplitDetailView(
+            transaction: .previewItemsOnly,
             userCurrency: "USD"
         )
     }

@@ -7,6 +7,8 @@
 
 import SwiftUI
 import Clerk
+import ConvexMobile
+import UIKit
 
 struct NewSplitSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -15,30 +17,29 @@ struct NewSplitSheet: View {
     
     @State private var viewModel: NewSplitViewModel
     
-    // All available friends
     let allFriends: [ConvexFriend]
     let selfFriend: ConvexFriend?
-    
-    // User's default currency
     let userDefaultCurrency: String
-    
-    // Receipt data if scanning
     let receiptResult: ReceiptScanResult?
     
     // MARK: - State
-    @State private var showPersonPicker = false
+    @State private var isSearchActive = false
     @State private var showPaidByPicker = false
     @State private var showError = false
     @State private var showReceiptCamera = false
     @State private var showAddItemSheet = false
     @State private var showReplaceReceiptAlert = false
+    @State private var showPhotoOverlay = false
+    @State private var showDeleteSplitAlert = false
     @State private var amountText: String = ""
-    @FocusState private var isSearchFocused: Bool
     @FocusState private var focusedField: Field?
     @State private var isEmojiFocused: Bool = false
+    @State private var isAmountFocused: Bool = false
+    @State private var fixedElementsWidth: CGFloat = 0
+    @State private var expandedItemIds: Set<UUID> = []
     
     private enum Field: Hashable {
-        case title, amount
+        case title
     }
     
     // MARK: - Initialization
@@ -58,95 +59,68 @@ struct NewSplitSheet: View {
         self._viewModel = State(initialValue: prefilledViewModel ?? NewSplitViewModel(preSelectedFriend: preSelectedFriend, defaultCurrency: userDefaultCurrency))
     }
     
-    // Non-self friends for selection
     private var selectableFriends: [ConvexFriend] {
         allFriends.filter { !$0.isSelf }
     }
     
+    // MARK: - Body
+    
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Row 1: Emoji + Title
-                    emojiTitleRow
-                    
-                    // Row 2: Paid By + Date
-                    paidByDateRow
-                    
-                    // Row 3: Split Method Selector
-                    splitMethodRow
-                    
-                    // Row 4: Currency/Amount
-                    amountRow
-                    
-                    // Row 5: Friends Section (Search + Scroll)
-                    friendsSection
-                    
-                    // Conditional: Receipt Preview
-                    if viewModel.scannedReceiptImage != nil {
-                        receiptPreviewSection
-                    }
-                    
-                    // Conditional: Itemized List
-                    if viewModel.splitMethod == .byItem && !viewModel.items.isEmpty {
-                        itemizedListSection
-                    }
-                    
-                    // Split Breakdown (for non-itemized methods)
-                    if !viewModel.participants.isEmpty && viewModel.splitMethod != .byItem {
-                        SplitBreakdownView(viewModel: viewModel)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .padding(.bottom, 80) // Space for bottom bar
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    focusedField = nil
-                    isEmojiFocused = false
-                }
-            }
+            contentWithSheetsAndAlerts
+        }
+        .overlay { searchOverlay }
+        .overlay { photoOverlay }
+        .animation(.easeInOut(duration: 0.3), value: isSearchActive)
+        .animation(.easeInOut(duration: 0.25), value: showPhotoOverlay)
+    }
+    
+    private var contentWithNavigation: some View {
+        mainScrollContent
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: focusedField) { _, newValue in
                 if newValue != nil {
+                    isAmountFocused = false
+                    isEmojiFocused = false
+                }
+            }
+            .onChange(of: isAmountFocused) { _, newValue in
+                if newValue {
+                    focusedField = nil
                     isEmojiFocused = false
                 }
             }
             .onChange(of: isEmojiFocused) { _, newValue in
                 if newValue {
                     focusedField = nil
+                    isAmountFocused = false
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                bottomActionBar
-            }
-            .navigationTitle("New Split")
+            .navigationTitle(viewModel.isEditing ? "Edit Split" : "New Split")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .disabled(viewModel.isLoading)
-                }
-            }
-            .sheet(isPresented: $showPersonPicker) {
-                PersonPickerSheet(
-                    friends: selectableFriends,
-                    selectedFriends: $viewModel.participants,
-                    onDone: { }
+            .toolbar { toolbarContent }
+            .safeAreaBar(edge: .bottom) {
+                NewSplitBottomBar(
+                    isEditing: viewModel.isEditing,
+                    isValid: viewModel.isValid,
+                    isLoading: viewModel.isLoading,
+                    hasReceiptImage: viewModel.scannedReceiptImage != nil,
+                    onSave: { saveSplit() },
+                    onDelete: { showDeleteSplitAlert = true },
+                    onScanReceipt: { showReceiptCamera = true },
+                    onReplaceReceipt: { showReplaceReceiptAlert = true }
                 )
             }
+    }
+    
+    private var contentWithSheetsAndAlerts: some View {
+        contentWithNavigation
             .sheet(isPresented: $showPaidByPicker) {
                 PaidByPickerSheet(
                     allFriends: allFriends,
                     selfFriend: selfFriend,
                     selectedFriend: $viewModel.paidBy,
                     onSelect: { friend in
-                        // Add the payer to participants if not already included
                         if !viewModel.participants.contains(where: { $0.id == friend.id }) {
                             viewModel.addParticipant(friend)
                         }
@@ -154,23 +128,19 @@ struct NewSplitSheet: View {
                 )
             }
             .sheet(isPresented: $showReceiptCamera) {
-                ReceiptCameraView { result in
-                    handleReceiptScanned(result)
-                }
+                ReceiptCameraView { result in handleReceiptScanned(result) }
             }
             .sheet(isPresented: $showAddItemSheet) {
                 AddItemSheet(
                     currencyCode: viewModel.currency,
-                    onAdd: { name, amount in
-                        viewModel.addItem(name: name, amount: amount)
+                    onAdd: { name, amount, quantity in
+                        viewModel.addItem(name: name, amount: amount, quantity: quantity)
                     }
                 )
             }
             .alert("Replace Receipt?", isPresented: $showReplaceReceiptAlert) {
                 Button("Cancel", role: .cancel) { }
-                Button("Replace", role: .destructive) {
-                    showReceiptCamera = true
-                }
+                Button("Replace", role: .destructive) { showReceiptCamera = true }
             } message: {
                 Text("Scanning a new receipt will replace the current receipt and all itemized items.")
             }
@@ -179,36 +149,344 @@ struct NewSplitSheet: View {
             } message: {
                 Text(viewModel.error ?? "An error occurred")
             }
-            .onAppear {
-                setupInitialData()
+            .alert("Delete Split", isPresented: $showDeleteSplitAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) { deleteSplit() }
+            } message: {
+                Text("Are you sure you want to delete this split? This cannot be undone.")
             }
+            .onAppear { setupInitialData() }
+    }
+    
+    // MARK: - Main Content
+    
+    private var mainScrollContent: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                emojiTitleRow
+                paidByRow
+                splitMethodRow
+                amountRow
+                friendsSection
+                
+                if viewModel.scannedReceiptImage != nil {
+                    receiptPreviewSection
+                }
+                
+                if viewModel.splitMethod == .byItem {
+                    ByItemSection(
+                        viewModel: viewModel,
+                        expandedItemIds: $expandedItemIds,
+                        showAddItemSheet: $showAddItemSheet,
+                        showReceiptCamera: $showReceiptCamera
+                    )
+                }
+                
+                if !viewModel.participants.isEmpty && viewModel.splitMethod != .byItem {
+                    SplitBreakdownView(viewModel: viewModel)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .padding(.bottom, 16)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusedField = nil
+                isAmountFocused = false
+                isEmojiFocused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        }
+    }
+    
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .disabled(viewModel.isLoading)
+        }
+        
+        ToolbarItem(placement: .topBarTrailing) {
+            Text(viewModel.date.smartFormatted)
+                .padding(.horizontal, 12)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.text)
+                .overlay {
+                    DatePicker(selection: $viewModel.date, in: ...Date(), displayedComponents: .date) {}
+                        .labelsHidden()
+                        .colorMultiply(.clear)
+                }
+        }
+    }
+    
+    // MARK: - Overlays
+    
+    @ViewBuilder
+    private var searchOverlay: some View {
+        if isSearchActive {
+            FriendSearchOverlay(
+                availableFriends: selectableFriends,
+                selectedFriends: $viewModel.participants,
+                selfFriend: selfFriend,
+                onDismiss: { isSearchActive = false }
+            )
+            .transition(.opacity)
+        }
+    }
+    
+    @ViewBuilder
+    private var photoOverlay: some View {
+        if showPhotoOverlay, let image = viewModel.scannedReceiptImage {
+            ReceiptPhotoOverlay(
+                image: image,
+                onDismiss: {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showPhotoOverlay = false
+                    }
+                },
+                onDeletePhoto: {
+                    withAnimation {
+                        if viewModel.splitMethod == .byItem {
+                            viewModel.clearReceiptPhoto()
+                        } else {
+                            viewModel.clearReceipt()
+                        }
+                    }
+                },
+                onScanNew: {
+                    showReplaceReceiptAlert = true
+                }
+            )
+            .transition(.opacity)
+        }
+    }
+    
+    // MARK: - Row 1: Emoji & Title
+    
+    private var emojiTitleRow: some View {
+        HStack(spacing: 12) {
+            EmojiTextField(text: $viewModel.emoji, isFocused: $isEmojiFocused)
+                .frame(width: 56, height: 56)
+            
+            TextField("Split Name", text: $viewModel.title)
+                .font(.title2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.text)
+                .focused($focusedField, equals: .title)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(.background.secondary)
+                .clipShape(Capsule())
+        }
+    }
+    
+    // MARK: - Row 2: Paid By
+    
+    private var paidByRow: some View {
+        HStack {
+            Text("Paid by")
+                .font(.subheadline)
+                .foregroundStyle(.text.opacity(0.6))
+            
+            Spacer()
+            
+            Button {
+                showPaidByPicker = true
+            } label: {
+                HStack(spacing: 6) {
+                    if let payer = viewModel.paidBy {
+                        FriendAvatar(friend: payer, size: 24)
+                        
+                        Text(payer.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.text)
+                    } else {
+                        Text("Select")
+                            .font(.subheadline)
+                            .foregroundStyle(.text.opacity(0.6))
+                    }
+                    
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.text.opacity(0.6))
+                }
+                .padding(.leading, viewModel.paidBy == nil ? 10 : 5)
+                .padding(.trailing, 10)
+                .padding(.vertical, viewModel.paidBy == nil ? 8 : 5)
+                .background(.background.secondary)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+    
+    // MARK: - Row 3: Split Method
+    
+    private var splitMethodRow: some View {
+        SplitMethodSelector(selectedMethod: $viewModel.splitMethod)
+            .frame(height: 64)
+    }
+    
+    // MARK: - Row 4: Amount
+
+    private let amountMinFieldWidth: CGFloat = 90
+    private let amountMinSpacing: CGFloat = 24
+    private let amountFieldLeadingPad: CGFloat = 2
+    private let amountCursorPadding: CGFloat = 8
+
+    private var amountRow: some View {
+        GeometryReader { geo in
+            let totalWidth = geo.size.width
+            let maxFieldWidth = max(amountMinFieldWidth, totalWidth - fixedElementsWidth - amountMinSpacing - amountFieldLeadingPad)
+            let displayText = amountText.isEmpty ? "0.00" : amountText
+            let textWidth = ExpandingAmountField.measuredWidth(for: displayText) + amountCursorPadding
+            let fieldWidth = max(amountMinFieldWidth, min(textWidth, maxFieldWidth))
+
+            HStack(spacing: 0) {
+                Text("Total")
+                    .font(.title)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+
+                Spacer(minLength: amountMinSpacing)
+
+                CurrencyButton(selectedCurrency: $viewModel.currency)
+                    .fixedSize()
+
+                CurrencySymbolView(currencyCode: viewModel.currency)
+                    .fixedSize()
+                    .padding(.leading, 6)
+
+                ExpandingAmountField(
+                    text: $amountText,
+                    isFocused: $isAmountFocused,
+                    placeholder: "0.00",
+                    fieldWidth: fieldWidth
+                )
+                .padding(.leading, amountFieldLeadingPad)
+                .onChange(of: amountText) { _, newValue in
+                    viewModel.totalAmount = Double(newValue) ?? 0
+                }
+            }
+            .background {
+                measureFixedElements
+            }
+        }
+        .frame(height: 44)
+        .padding(.vertical, 16)
+    }
+
+    private var measureFixedElements: some View {
+        HStack(spacing: 0) {
+            Text("Total")
+                .font(.title)
+                .fontWeight(.medium)
+                .fixedSize()
+
+            CurrencyButton(selectedCurrency: .constant(viewModel.currency))
+                .fixedSize()
+
+            CurrencySymbolView(currencyCode: viewModel.currency)
+                .fixedSize()
+                .padding(.leading, 6)
+        }
+        .hidden()
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: WidthPreferenceKey.self, value: proxy.size.width)
+            }
+        )
+        .onPreferenceChange(WidthPreferenceKey.self) { width in
+            fixedElementsWidth = width
+        }
+    }
+    
+    // MARK: - Friends Section
+    
+    private var friendsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !viewModel.participants.isEmpty {
+                SelectedFriendsScroll(
+                    friends: viewModel.participants,
+                    selfFriend: selfFriend,
+                    onRemove: { friend in
+                        viewModel.removeParticipant(friend)
+                        if viewModel.paidBy?.id == friend.id {
+                            viewModel.paidBy = nil
+                        }
+                    }
+                )
+                .padding(.horizontal, -20)
+            }
+            
+            FriendSearchTrigger {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isSearchActive = true
+                }
+            }
+        }
+    }
+    
+    // MARK: - Receipt Preview
+    
+    @ViewBuilder
+    private var receiptPreviewSection: some View {
+        if let image = viewModel.scannedReceiptImage {
+            ReceiptPreviewRow(
+                image: image,
+                showMismatchWarning: viewModel.splitMethod == .byItem && viewModel.itemsTotalMismatch,
+                itemsTotal: viewModel.itemsTotal,
+                splitTotal: viewModel.totalAmount,
+                currencyCode: viewModel.currency,
+                onScanReceipt: { showReceiptCamera = true },
+                onDeletePhoto: {
+                    withAnimation {
+                        if viewModel.splitMethod == .byItem {
+                            viewModel.clearReceiptPhoto()
+                        } else {
+                            viewModel.clearReceipt()
+                        }
+                    }
+                },
+                onScanNewReceipt: {
+                    showReplaceReceiptAlert = true
+                },
+                onTapPhoto: {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showPhotoOverlay = true
+                    }
+                }
+            )
         }
     }
     
     // MARK: - Setup
     
     private func setupInitialData() {
-        // Set default payer to self
         if viewModel.paidBy == nil, let self_ = selfFriend {
             viewModel.paidBy = self_
         }
         
-        // Add self to participants if not already
         if let self_ = selfFriend, !viewModel.participants.contains(where: { $0.id == self_.id }) {
             viewModel.addParticipant(self_)
         }
         
-        // Apply receipt data if available
         if let receipt = receiptResult {
             viewModel.replaceReceiptData(from: receipt)
         }
         
-        // Seed amountText from viewModel if pre-filled (e.g. from receipt or prefilled preview)
         if viewModel.totalAmount > 0 {
             amountText = String(format: "%.2f", viewModel.totalAmount)
         }
         
-        // Set default currency (already set in ViewModel init, but ensure it's consistent)
         if viewModel.currency.isEmpty {
             viewModel.currency = userDefaultCurrency
         }
@@ -218,6 +496,9 @@ struct NewSplitSheet: View {
     
     private func handleReceiptScanned(_ result: ReceiptScanResult) {
         viewModel.replaceReceiptData(from: result)
+        if viewModel.totalAmount > 0 {
+            amountText = String(format: "%.2f", viewModel.totalAmount)
+        }
     }
     
     // MARK: - Save
@@ -245,472 +526,28 @@ struct NewSplitSheet: View {
         }
     }
     
-    // MARK: - Row 1: Emoji & Title Row
+    // MARK: - Delete (edit mode only)
     
-    private var emojiTitleRow: some View {
-        HStack(spacing: 12) {
-            // Emoji picker
-            EmojiTextField(text: $viewModel.emoji, isFocused: $isEmojiFocused)
-                .frame(width: 56, height: 56)
-                
-            
-            // Title text field
-            TextField("Split Name", text: $viewModel.title)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .foregroundStyle(.text)
-                .focused($focusedField, equals: .title)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(.background.secondary)
-                .clipShape(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+    private func deleteSplit() {
+        guard let txId = viewModel.editingTransactionId else { return }
+        
+        Task {
+            do {
+                let _: Bool = try await convexService.client.mutation(
+                    "transactions:deleteTransaction",
+                    with: ["transactionId": txId]
                 )
-        }
-    }
-    
-    // MARK: - Row 2: Paid By + Date Row
-    
-    private var paidByDateRow: some View {
-        VStack(spacing: 10) {
-            // Paid by label and picker
-            
-            Text("paid by:")
-                .font(.subheadline)
-                .foregroundStyle(.text.opacity(0.6))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            HStack {
-                
-                HStack(spacing: 8) {
-                    Button {
-                        showPaidByPicker = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            if let payer = viewModel.paidBy {
-                                PaidByAvatar(friend: payer, size: 24)
-                                
-                                Text(payer.displayName)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.text)
-                            } else {
-                                Text("Select")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.text.opacity(0.6))
-                            }
-                            
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(.text.opacity(0.6))
-                        }
-                        .padding(.leading, viewModel.paidBy == nil ? 10 : 5)
-                        .padding(.trailing, 10)
-                        .padding(.vertical, viewModel.paidBy == nil ? 8 : 5)
-                        .background(.background.secondary)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
+                await MainActor.run {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    dismiss()
                 }
-                
-                Spacer()
-                
-                // Date picker
-                DatePicker("", selection: $viewModel.date, displayedComponents: .date)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-            }
-        }
-    }
-    
-    // MARK: - Row 3: Split Method Selector
-    
-    private var splitMethodRow: some View {
-        SplitMethodSelector(selectedMethod: $viewModel.splitMethod)
-            .frame(height: 64)
-    }
-    
-    // MARK: - Row 4: Amount Row
-    
-    private var amountRow: some View {
-        HStack(spacing: 16) {
-            Text("Total")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
-            
-            Spacer()
-            
-            CurrencyButton(selectedCurrency: $viewModel.currency)
-            
-            CurrencySymbolView(currencyCode: viewModel.currency)
-                .font(.title2)
-            
-            TextField("0.00", text: $amountText)
-                .font(.title)
-                .fontWeight(.bold)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .fixedSize()
-                .focused($focusedField, equals: .amount)
-                .onChange(of: amountText) { _, newValue in
-                    viewModel.totalAmount = Double(newValue) ?? 0
-                }
-        }
-    }
-    
-    // MARK: - Row 4: Friends Section
-    
-    private var friendsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Inline search
-            InlineFriendSearch(
-                availableFriends: selectableFriends,
-                selectedFriends: $viewModel.participants
-            )
-            
-            // Selected friends horizontal scroll
-            if !viewModel.participants.isEmpty {
-                SelectedFriendsScroll(
-                    friends: viewModel.participants,
-                    selfFriend: selfFriend,
-                    onRemove: { friend in
-                        viewModel.removeParticipant(friend)
-                        // Clear paidBy if the removed friend was the payer
-                        if viewModel.paidBy?.id == friend.id {
-                            viewModel.paidBy = nil
-                        }
-                    },
-                    onAddMore: {
-                        showPersonPicker = true
-                    }
-                )
-            }
-        }
-    }
-    
-    // MARK: - Receipt Preview Section
-    
-    @ViewBuilder
-    private var receiptPreviewSection: some View {
-        if let image = viewModel.scannedReceiptImage {
-            ReceiptPreviewRow(
-                image: image,
-                onRemove: {
-                    withAnimation {
-                        viewModel.clearReceipt()
-                    }
-                }
-            )
-        }
-    }
-    
-    // MARK: - Itemized List Section
-    
-    private var itemizedListSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                Text("Items")
-                    .font(.headline)
-                
-                Spacer()
-                
-                Button {
-                    showAddItemSheet = true
-                } label: {
-                    Label("Add", systemImage: "plus")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-            }
-            
-            // Items list
-            ForEach(viewModel.items) { item in
-                ExpandableItemRow(
-                    item: item,
-                    participants: viewModel.participants,
-                    currencyCode: viewModel.currency,
-                    onToggleAssignment: { friend in
-                        viewModel.toggleItemAssignment(item: item, friend: friend)
-                    },
-                    onRemove: {
-                        withAnimation {
-                            viewModel.removeItem(item)
-                        }
-                    }
-                )
-            }
-            
-            // Items total
-            HStack {
-                Text("Items Total")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                Text(viewModel.itemsTotal.asCurrency(code: viewModel.currency))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-            }
-            .padding(.top, 8)
-        }
-    }
-    
-    // MARK: - Bottom Action Bar
-    
-    private var bottomActionBar: some View {
-        GlassEffectContainer(spacing: 20) {
-            HStack(spacing: 12) {
-                // Scan receipt button (icon only)
-                Button {
-                    if viewModel.scannedReceiptImage != nil {
-                        showReplaceReceiptAlert = true
-                    } else {
-                        showReceiptCamera = true
-                    }
-                } label: {
-                    Image(systemName: "doc.text.viewfinder")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.accent)
-                        .frame(width: 52, height: 52)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                }
-                .buttonStyle(.plain)
-                
-                // Add Split button (main action)
-                Button {
-                    saveSplit()
-                } label: {
-                    HStack(spacing: 8) {
-                        if viewModel.isLoading {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text("Add Split")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(viewModel.isValid ? Color.accentColor : Color.secondary)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.isValid || viewModel.isLoading)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-        }
-        .background(.ultraThinMaterial)
-    }
-}
-
-// MARK: - Paid By Avatar
-
-private struct PaidByAvatar: View {
-    let friend: ConvexFriend
-    let size: CGFloat
-    
-    var body: some View {
-        if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                initialsView
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            initialsView
-        }
-    }
-    
-    private var initialsView: some View {
-        Text(friend.initials)
-            .font(.system(size: size * 0.4, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Color.accentColor)
-            .clipShape(Circle())
-    }
-}
-
-// MARK: - Add Item Sheet
-
-struct AddItemSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    
-    let currencyCode: String
-    let onAdd: (String, Double) -> Void
-    
-    @State private var itemName = ""
-    @State private var itemAmount: Double = 0
-    
-    private var isValid: Bool {
-        !itemName.isEmpty && itemAmount > 0
-    }
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Item Details") {
-                    TextField("Item name", text: $itemName)
-                    
-                    HStack {
-                        Text("Amount")
-                        Spacer()
-                        TextField("0.00", value: $itemAmount, format: .currency(code: currencyCode))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-            }
-            .navigationTitle("Add Item")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        onAdd(itemName, itemAmount)
-                        dismiss()
-                    }
-                    .disabled(!isValid)
+            } catch {
+                await MainActor.run {
+                    viewModel.error = error.localizedDescription
+                    showError = true
                 }
             }
         }
-        .presentationDetents([.medium])
-    }
-}
-
-// MARK: - Paid By Picker Sheet
-
-struct PaidByPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    
-    let allFriends: [ConvexFriend]
-    let selfFriend: ConvexFriend?
-    @Binding var selectedFriend: ConvexFriend?
-    let onSelect: (ConvexFriend) -> Void
-    
-    @State private var searchText = ""
-    
-    /// All available options including self
-    private var allOptions: [ConvexFriend] {
-        var options = allFriends
-        if let self_ = selfFriend, !options.contains(where: { $0.id == self_.id }) {
-            options.insert(self_, at: 0)
-        }
-        return options
-    }
-    
-    /// Filtered options based on search
-    private var filteredOptions: [ConvexFriend] {
-        if searchText.isEmpty {
-            return allOptions
-        }
-        return allOptions.filter { friend in
-            friend.name.localizedCaseInsensitiveContains(searchText) ||
-            (friend.email?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
-    
-    var body: some View {
-        NavigationStack {
-            List {
-                if filteredOptions.isEmpty {
-                    ContentUnavailableView(
-                        "No Results",
-                        systemImage: "magnifyingglass",
-                        description: Text("No people match \"\(searchText)\"")
-                    )
-                } else {
-                    ForEach(filteredOptions, id: \.id) { friend in
-                        Button {
-                            selectedFriend = friend
-                            onSelect(friend)
-                            dismiss()
-                        } label: {
-                            HStack {
-                                PaidByPickerAvatar(friend: friend, size: 36)
-                                
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(friend.displayName)
-                                        .foregroundStyle(.primary)
-                                    
-                                    if let email = friend.email {
-                                        Text(email)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                
-                                Spacer()
-                                
-                                if selectedFriend?.id == friend.id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.accent)
-                                        .fontWeight(.semibold)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .searchable(text: $searchText, prompt: "Search people")
-            .navigationTitle("Who Paid?")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-// MARK: - Paid By Picker Avatar
-
-private struct PaidByPickerAvatar: View {
-    let friend: ConvexFriend
-    let size: CGFloat
-    
-    var body: some View {
-        if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                initialsView
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            initialsView
-        }
-    }
-    
-    private var initialsView: some View {
-        Text(friend.initials)
-            .font(.system(size: size * 0.4, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Color.accentColor)
-            .clipShape(Circle())
     }
 }
 
@@ -816,6 +653,7 @@ private enum NewSplitSheetPreviewData {
     static var receiptResult: ReceiptScanResult {
         ReceiptScanResult(
             title: "Grocery Run",
+            emoji: "🛒",
             total: 64.32,
             items: [
                 SplitItem(name: "Milk", amount: 4.99, assignedTo: []),
@@ -907,4 +745,3 @@ private enum NewSplitSheetPreviewData {
     )
     .environment(\.convexService, ConvexService.shared)
 }
-

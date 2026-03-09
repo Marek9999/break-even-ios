@@ -60,10 +60,10 @@ private struct ConvexSplitPayload: Encodable {
 
 /// Split method options for dividing expenses
 enum NewSplitMethod: String, CaseIterable, Identifiable {
-    case equal = "Equal"
-    case unequal = "Unequal"
-    case byParts = "By Parts"
-    case byItem = "By Item"
+    case equal = "EQUAL"
+    case unequal = "UNEQUAL"
+    case byParts = "BY PARTS"
+    case byItem = "BY ITEM"
     
     var id: String { rawValue }
     
@@ -94,14 +94,31 @@ enum NewSplitMethod: String, CaseIterable, Identifiable {
         case .byItem: return "byItem"
         }
     }
+    
+    /// Parse from Convex split method string
+    static func from(convexValue: String) -> NewSplitMethod? {
+        switch convexValue {
+        case "equal": return .equal
+        case "unequal": return .unequal
+        case "byParts": return .byParts
+        case "byItem": return .byItem
+        default: return nil
+        }
+    }
 }
 
 /// Item for by-item split method
+/// `amount` is the per-unit price; total = amount * quantity
 struct SplitItem: Identifiable, Hashable {
     var id = UUID()
     var name: String
+    var quantity: Int = 1
     var amount: Double
-    var assignedTo: Set<String> = [] // Friend IDs
+    var assignedTo: Set<String> = []
+    
+    var totalPrice: Double {
+        amount * Double(quantity)
+    }
     
     var formattedAmount: String {
         amount.asCurrency
@@ -130,6 +147,9 @@ class NewSplitViewModel {
     /// For unequal split: custom amounts per friend ID
     var customAmounts: [String: Double] = [:]
     
+    /// For unequal split: tracks which participants have had a value manually entered
+    var unequalEnteredIds: Set<String> = []
+    
     /// For by-parts split: number of parts per friend ID
     var partsPerPerson: [String: Int] = [:]
     
@@ -144,6 +164,10 @@ class NewSplitViewModel {
     // MARK: - Pre-selection (from PersonDetailSheet)
     var preSelectedFriend: ConvexFriend?
     
+    // MARK: - Edit Mode
+    var editingTransactionId: String?
+    var isEditing: Bool { editingTransactionId != nil }
+    
     // MARK: - State
     var isLoading = false
     var error: String?
@@ -151,10 +175,16 @@ class NewSplitViewModel {
     // MARK: - Computed Properties
     
     var isValid: Bool {
-        !title.isEmpty && 
-        totalAmount > 0 && 
-        paidBy != nil && 
-        !participants.isEmpty
+        guard !title.isEmpty,
+              totalAmount > 0,
+              paidBy != nil,
+              !participants.isEmpty else { return false }
+        
+        if splitMethod == .unequal {
+            return abs(unequalSplitDifference) < 0.01
+        }
+        
+        return true
     }
     
     var totalParts: Int {
@@ -164,7 +194,11 @@ class NewSplitViewModel {
     }
     
     var itemsTotal: Double {
-        items.reduce(0) { $0 + $1.amount }
+        items.reduce(0) { $0 + $1.totalPrice }
+    }
+    
+    var itemsTotalMismatch: Bool {
+        !items.isEmpty && abs(itemsTotal - totalAmount) > 0.01
     }
     
     // MARK: - Exchange Rates
@@ -180,6 +214,58 @@ class NewSplitViewModel {
         self.preSelectedFriend = preSelectedFriend
         if let friend = preSelectedFriend {
             self.participants = [friend]
+        }
+    }
+    
+    /// Initialize in edit mode from an existing transaction
+    init(from transaction: EnrichedTransaction, allFriends: [ConvexFriend]) {
+        self.editingTransactionId = transaction._id
+        self.emoji = transaction.emoji
+        self.title = transaction.title
+        self.date = transaction.dateValue
+        self.currency = transaction.currency
+        self.totalAmount = transaction.totalAmount
+        self.paidBy = transaction.payer
+        self.receiptFileId = transaction.receiptFileId
+        self.exchangeRates = transaction.exchangeRates
+        
+        let method = NewSplitMethod.from(convexValue: transaction.splitMethod) ?? .equal
+        self.splitMethod = method
+        
+        let participantFriends: [ConvexFriend] = transaction.splits.compactMap { split in
+            if let friend = split.friend { return friend }
+            return allFriends.first { $0._id == split.friendId }
+        }
+        self.participants = participantFriends
+        
+        switch method {
+        case .equal:
+            break
+        case .unequal:
+            for split in transaction.splits {
+                customAmounts[split.friendId] = split.amount
+                unequalEnteredIds.insert(split.friendId)
+            }
+        case .byParts:
+            for split in transaction.splits {
+                if let pct = split.percentage, pct > 0 {
+                    let parts = max(1, Int(round(pct / 10.0)))
+                    partsPerPerson[split.friendId] = parts
+                } else {
+                    partsPerPerson[split.friendId] = 1
+                }
+            }
+        case .byItem:
+            if let txItems = transaction.items {
+                self.items = txItems.map { item in
+                    SplitItem(
+                        name: item.name,
+                        quantity: item.quantity,
+                        amount: item.unitPrice,
+                        assignedTo: Set(item.assignedToIds)
+                    )
+                }
+            }
         }
     }
     
@@ -206,7 +292,7 @@ class NewSplitViewModel {
             for item in items {
                 if item.assignedTo.contains(friend.id) {
                     let splitCount = max(item.assignedTo.count, 1)
-                    personTotal += item.amount / Double(splitCount)
+                    personTotal += item.totalPrice / Double(splitCount)
                 }
             }
             return personTotal
@@ -232,6 +318,7 @@ class NewSplitViewModel {
         participants.removeAll { $0.id == friend.id }
         partsPerPerson.removeValue(forKey: friend.id)
         customAmounts.removeValue(forKey: friend.id)
+        unequalEnteredIds.remove(friend.id)
         
         // Remove from item assignments
         for index in items.indices {
@@ -249,9 +336,16 @@ class NewSplitViewModel {
     
     // MARK: - Item Management (for by-item split)
     
-    func addItem(name: String, amount: Double) {
-        let item = SplitItem(name: name, amount: amount)
+    func addItem(name: String, amount: Double, quantity: Int = 1) {
+        let item = SplitItem(name: name, quantity: quantity, amount: amount)
         items.append(item)
+    }
+    
+    func updateItem(id: UUID, name: String, quantity: Int, amount: Double) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].name = name
+        items[index].quantity = quantity
+        items[index].amount = amount
     }
     
     func removeItem(_ item: SplitItem) {
@@ -266,6 +360,16 @@ class NewSplitViewModel {
         } else {
             items[index].assignedTo.insert(friend.id)
         }
+    }
+    
+    func assignAllToItem(item: SplitItem) {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index].assignedTo = Set(participants.map(\.id))
+    }
+    
+    func unassignAllFromItem(item: SplitItem) {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index].assignedTo.removeAll()
     }
     
     // MARK: - Parts Management (for by-parts split)
@@ -296,9 +400,31 @@ class NewSplitViewModel {
         customAmounts[friend.id] ?? 0
     }
     
+    /// Sum of custom amounts only for current participants
+    var assignedTotal: Double {
+        participants.reduce(0) { $0 + (customAmounts[$1.id] ?? 0) }
+    }
+    
+    /// Positive = remaining, negative = over budget
+    var unequalSplitDifference: Double {
+        totalAmount - assignedTotal
+    }
+    
     var remainingToAssign: Double {
-        let assigned = customAmounts.values.reduce(0, +)
-        return max(0, totalAmount - assigned)
+        totalAmount - assignedTotal
+    }
+    
+    func suggestedPlaceholder(for friend: ConvexFriend) -> String {
+        guard !unequalEnteredIds.contains(friend.id) else { return "0.00" }
+        let unfilledCount = participants.filter { !unequalEnteredIds.contains($0.id) }.count
+        guard unfilledCount > 0 else { return "0.00" }
+        let filledSum = participants
+            .filter { unequalEnteredIds.contains($0.id) }
+            .reduce(0.0) { $0 + (customAmounts[$1.id] ?? 0) }
+        let remainder = totalAmount - filledSum
+        guard remainder > 0 else { return "0.00" }
+        let suggested = remainder / Double(unfilledCount)
+        return String(format: "%.2f", suggested)
     }
     
     // MARK: - Receipt Processing
@@ -320,33 +446,30 @@ class NewSplitViewModel {
         receiptFileId = nil
         items = []
         
-        // Reset split method if it was by-item
         if splitMethod == .byItem {
             splitMethod = .equal
         }
     }
     
+    /// Clear only the receipt photo, keeping the item list intact
+    func clearReceiptPhoto() {
+        scannedReceiptImage = nil
+        receiptFileId = nil
+    }
+    
     /// Replace existing receipt data with new scan result
     func replaceReceiptData(from result: ReceiptScanResult) {
-        // Clear existing receipt
         receiptFileId = nil
         
-        // Apply new data
         title = result.title.isEmpty ? "Receipt" : result.title
         totalAmount = result.total
-        emoji = "🧾"
+        emoji = result.emoji ?? "🧾"
         scannedReceiptImage = result.image
-        
-        // Convert receipt items to split items
         items = result.items
-        
-        // Always default to "by item" split method when scanning a receipt
         splitMethod = .byItem
         
         print("=== Receipt Data Replaced ===")
-        print("Title: \(title)")
-        print("Total: \(totalAmount)")
-        print("Items count: \(items.count)")
+        print("Title: \(title), Emoji: \(emoji), Total: \(totalAmount), Items: \(items.count)")
         print("=============================")
     }
     
@@ -473,33 +596,58 @@ class NewSplitViewModel {
             rates = try await fetchExchangeRates()
         } catch {
             print("=== Warning: Could not fetch exchange rates: \(error) ===")
-            // Continue without exchange rates - balances won't be converted
             rates = nil
         }
         
         // Handle receipt image if we have one
         var finalReceiptFileId: String? = receiptFileId
         if let image = scannedReceiptImage, receiptFileId == nil {
-            // Save to Photo Library (don't fail the whole save if this fails)
             do {
                 try await saveReceiptToPhotoLibrary(image: image)
             } catch {
                 print("=== Warning: Could not save to Photo Library: \(error) ===")
-                // Continue with upload to Convex even if Photo Library save fails
             }
-            
-            // Upload to Convex cloud storage
             finalReceiptFileId = try await uploadReceiptImage(image: image)
         }
         
-        // Prepare items as JSON string (for complex nested data)
+        let args = try buildMutationArgs(
+            clerkId: clerkId,
+            paidBy: paidBy,
+            finalReceiptFileId: finalReceiptFileId,
+            rates: rates
+        )
+        
+        let client = ConvexService.shared.client
+        
+        if let txId = editingTransactionId {
+            var updateArgs = args
+            updateArgs["transactionId"] = txId
+            let _: String = try await client.mutation(
+                "transactions:updateTransactionFromJson",
+                with: updateArgs
+            )
+        } else {
+            let _: String = try await client.mutation(
+                "transactions:createTransactionFromJson",
+                with: args
+            )
+        }
+    }
+    
+    /// Build the shared mutation args dictionary for both create and update
+    private func buildMutationArgs(
+        clerkId: String,
+        paidBy: ConvexFriend,
+        finalReceiptFileId: String?,
+        rates: ExchangeRates?
+    ) throws -> [String: String] {
         var itemsJson: String? = nil
         if splitMethod == .byItem && !items.isEmpty {
             let convexItems = items.map { item in
                 ConvexItemPayload(
                     id: item.id.uuidString,
                     name: item.name,
-                    quantity: 1,
+                    quantity: item.quantity,
                     unitPrice: item.amount,
                     assignedToIds: Array(item.assignedTo)
                 )
@@ -507,11 +655,10 @@ class NewSplitViewModel {
             itemsJson = try convexItems.asJSONString()
         }
         
-        // Prepare splits as JSON string (for complex nested data)
         let splitPayloads: [ConvexSplitPayload] = participants.map { friend in
             let amount = calculateShare(for: friend)
-            let percentage: Double? = splitMethod == .byParts 
-                ? Double(getParts(for: friend)) / Double(totalParts) * 100 
+            let percentage: Double? = splitMethod == .byParts
+                ? Double(getParts(for: friend)) / Double(totalParts) * 100
                 : nil
             
             return ConvexSplitPayload(
@@ -522,7 +669,6 @@ class NewSplitViewModel {
         }
         let splitsJson = try splitPayloads.asJSONString()
         
-        // Build args with simple types only
         var args: [String: String] = [
             "clerkId": clerkId,
             "paidById": paidBy.id,
@@ -543,16 +689,11 @@ class NewSplitViewModel {
             args["receiptFileId"] = fileId
         }
         
-        // Add exchange rates JSON if available
         if let rates = rates, let ratesJson = rates.toJSONString() {
             args["exchangeRatesJson"] = ratesJson
         }
         
-        let client = ConvexService.shared.client
-        let _: String = try await client.mutation(
-            "transactions:createTransactionFromJson",
-            with: args
-        )
+        return args
     }
     
     // MARK: - Reset
@@ -566,6 +707,7 @@ class NewSplitViewModel {
         totalAmount = 0
         splitMethod = .equal
         customAmounts = [:]
+        unequalEnteredIds = []
         partsPerPerson = [:]
         items = []
         scannedReceiptImage = nil

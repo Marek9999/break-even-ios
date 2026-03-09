@@ -12,7 +12,6 @@ struct SelectedFriendsScroll: View {
     let friends: [ConvexFriend]
     let selfFriend: ConvexFriend?
     let onRemove: (ConvexFriend) -> Void
-    let onAddMore: () -> Void
     
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -24,26 +23,22 @@ struct SelectedFriendsScroll: View {
                         onRemove: { onRemove(friend) }
                     )
                 }
-                
-                // Add more button
-                addButton
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
         }
+        .scrollClipDisabled()
+        .mask(
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 16)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 16)
+            }
+        )
     }
     
-    // MARK: - Add Button
-    
-    private var addButton: some View {
-        Button(action: onAddMore) {
-            Image(systemName: "plus")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.accent)
-                .frame(width: 44, height: 44)
-                .glassEffect(.regular.interactive(), in: .circle)
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 // MARK: - Friend Chip View
@@ -56,7 +51,7 @@ struct FriendChipView: View {
     var body: some View {
         HStack(spacing: 8) {
             // Avatar
-            FriendChipAvatar(friend: friend, size: 32)
+            FriendAvatar(friend: friend, size: 32)
             
             // Name
             Text(friend.displayName)
@@ -69,7 +64,7 @@ struct FriendChipView: View {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.text.opacity(0.6))
                 }
                 .buttonStyle(.plain)
             }
@@ -78,38 +73,6 @@ struct FriendChipView: View {
         .padding(.trailing, isSelf ? 12 : 8)
         .padding(.vertical, 4)
         .glassEffect(.regular, in: .capsule)
-    }
-}
-
-// MARK: - Friend Chip Avatar
-
-private struct FriendChipAvatar: View {
-    let friend: ConvexFriend
-    let size: CGFloat
-    
-    var body: some View {
-        if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                initialsView
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            initialsView
-        }
-    }
-    
-    private var initialsView: some View {
-        Text(friend.initials)
-            .font(.system(size: size * 0.4, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Color.accentColor)
-            .clipShape(Circle())
     }
 }
 
@@ -124,8 +87,7 @@ private struct FriendChipAvatar: View {
                 SelectedFriendsScroll(
                     friends: friends,
                     selfFriend: nil,
-                    onRemove: { _ in },
-                    onAddMore: { }
+                    onRemove: { _ in }
                 )
                 .padding()
             }

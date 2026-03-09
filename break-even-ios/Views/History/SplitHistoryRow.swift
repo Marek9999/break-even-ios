@@ -11,86 +11,58 @@ struct SplitHistoryRow: View {
     let transaction: EnrichedTransaction
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Emoji
+        HStack(spacing: 10) {
             Text(transaction.emoji)
-                .font(.title2)
-                .frame(width: 44, height: 44)
-                .background(Color.accent.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .font(Font.system(size: 16))
+                .frame(width: 36, height: 36)
+                .background(Color.accent.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             
-            // Details
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(transaction.title)
                     .font(.body)
                     .fontWeight(.medium)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.text)
                     .lineLimit(1)
                 
                 HStack(spacing: 4) {
                     Text(transaction.payerName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
                     Text("•")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
                     Text(transaction.dateValue.smartFormatted)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                .font(.subheadline)
+                .foregroundStyle(.text.opacity(0.6))
             }
             
             Spacer()
             
-            // Amount
             Text(transaction.formattedAmount)
                 .font(.body)
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(Color.secondary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
     }
 }
 
-#Preview {
-    VStack(spacing: 8) {
-        SplitHistoryRow(
-            transaction: EnrichedTransaction(
-                _id: "1",
-                createdById: "user1",
-                paidById: "friend1",
-                title: "Team Dinner",
-                emoji: "🍕",
-                description: nil,
-                totalAmount: 156.80,
-                currency: "USD",
-                splitMethod: "equal",
-                receiptFileId: nil,
-                items: nil,
-                exchangeRates: nil,
-                date: Date().timeIntervalSince1970 * 1000,
-                createdAt: Date().timeIntervalSince1970 * 1000,
-                payer: ConvexFriend(
-                    _id: "friend1",
-                    ownerId: "user1",
-                    linkedUserId: nil,
-                    name: "Me",
-                    email: nil,
-                    phone: nil,
-                    avatarUrl: nil,
-                    isDummy: false,
-                    isSelf: true,
-                    createdAt: Date().timeIntervalSince1970 * 1000
-                ),
-                splits: [],
-                receiptUrl: nil
-            )
-        )
+#Preview("Single Row") {
+    SplitHistoryRow(transaction: .previewDinner)
+        .padding()
+}
+
+#Preview("List Container") {
+    VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(EnrichedTransaction.previewList.enumerated()), id: \.element._id) { index, tx in
+            SplitHistoryRow(transaction: tx)
+            if index < EnrichedTransaction.previewList.count - 1 {
+                Divider()
+                    .padding(.vertical, 12)
+            }
+        }
     }
     .padding()
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(.background.secondary.opacity(0.6))
+    .clipShape(RoundedRectangle(cornerRadius: 20))
+    .padding(.horizontal)
 }

@@ -886,6 +886,137 @@ export const getBalanceWithFriend = query({
 });
 
 /**
+ * Update an existing transaction and replace its splits (for iOS compatibility)
+ * Uses the same JSON-string approach as createTransactionFromJson
+ */
+export const updateTransactionFromJson = mutation({
+  args: {
+    transactionId: v.id("transactions"),
+    clerkId: v.string(),
+    paidById: v.string(),
+    title: v.string(),
+    emoji: v.string(),
+    totalAmount: v.string(),
+    currency: v.string(),
+    splitMethod: v.string(),
+    date: v.string(),
+    splitsJson: v.string(),
+    itemsJson: v.optional(v.string()),
+    receiptFileId: v.optional(v.string()),
+    exchangeRatesJson: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const existing = await ctx.db.get(args.transactionId);
+    if (!existing) {
+      throw new Error("Transaction not found");
+    }
+    if (existing.createdById !== user._id) {
+      throw new Error("Not authorized to edit this transaction");
+    }
+
+    const paidById = args.paidById as Id<"friends">;
+    const totalAmount = parseFloat(args.totalAmount);
+    const date = parseFloat(args.date);
+
+    interface SplitData {
+      friendId: string;
+      amount: number;
+      percentage?: number | null;
+    }
+    const splits: SplitData[] = JSON.parse(args.splitsJson);
+
+    interface ItemData {
+      id: string;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+      assignedToIds: string[];
+    }
+    let items: ItemData[] | undefined;
+    if (args.itemsJson) {
+      items = JSON.parse(args.itemsJson);
+    }
+
+    interface ExchangeRatesData {
+      baseCurrency: string;
+      rates: {
+        USD: number;
+        EUR: number;
+        GBP: number;
+        CAD: number;
+        AUD: number;
+        INR: number;
+        JPY: number;
+      };
+      fetchedAt: number;
+    }
+    let exchangeRates: ExchangeRatesData | undefined;
+    if (args.exchangeRatesJson) {
+      exchangeRates = JSON.parse(args.exchangeRatesJson);
+    }
+
+    const convertedItems = items?.map((item) => ({
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      assignedToIds: item.assignedToIds.map((id) => id as Id<"friends">),
+    }));
+
+    // Update the transaction document
+    await ctx.db.patch(args.transactionId, {
+      paidById,
+      title: args.title,
+      emoji: args.emoji,
+      totalAmount,
+      currency: args.currency,
+      splitMethod: args.splitMethod,
+      receiptFileId: args.receiptFileId
+        ? (args.receiptFileId as Id<"_storage">)
+        : undefined,
+      items: convertedItems,
+      exchangeRates,
+      date,
+    });
+
+    // Delete all existing splits for this transaction
+    const existingSplits = await ctx.db
+      .query("splits")
+      .withIndex("by_transaction", (q) =>
+        q.eq("transactionId", args.transactionId)
+      )
+      .collect();
+
+    for (const split of existingSplits) {
+      await ctx.db.delete(split._id);
+    }
+
+    // Create new splits
+    for (const split of splits) {
+      const friendId = split.friendId as Id<"friends">;
+      await ctx.db.insert("splits", {
+        transactionId: args.transactionId,
+        friendId,
+        amount: split.amount,
+        percentage: split.percentage ?? undefined,
+        createdAt: Date.now(),
+      });
+    }
+
+    return args.transactionId;
+  },
+});
+
+/**
  * Delete a transaction and all its splits
  */
 export const deleteTransaction = mutation({

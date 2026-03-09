@@ -188,7 +188,7 @@ struct HomeView: View {
                 } label: {
                     Image(systemName: "viewfinder")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.accent)
+                        .foregroundStyle(.text)
                         .frame(width: 56, height: 56)
                         .glassEffect(.clear.tint(.accent.opacity(0.2)).interactive())
                 }

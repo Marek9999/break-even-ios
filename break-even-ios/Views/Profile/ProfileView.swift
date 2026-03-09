@@ -152,6 +152,18 @@ struct ProfileView: View {
                 // Developer Section (for testing)
                 #if DEBUG
                 Section {
+                    NavigationLink {
+                        ShaderTestView()
+                    } label: {
+                        Label("Scan Beam Shader Test", systemImage: "wand.and.rays")
+                    }
+                    
+                    NavigationLink {
+                        EdgeCurveLabView()
+                    } label: {
+                        Label("Edge Curve Lab", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                    
                     // Manual sync button
                     Button {
                         manualSyncUser()

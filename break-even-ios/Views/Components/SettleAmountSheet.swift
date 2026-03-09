@@ -247,7 +247,7 @@ struct SettleView: View {
                     .padding(.horizontal, 12)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundStyle(.accent)
+                    .foregroundStyle(.text)
                     .overlay {
                         DatePicker(selection: $settlementDate, in: ...Date(), displayedComponents: .date) {}
                             .labelsHidden()

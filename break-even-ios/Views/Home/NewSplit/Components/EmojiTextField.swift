@@ -267,7 +267,7 @@ struct EmojiTextField: View {
             isFocused = true
         }
         .background(Color.accent.opacity(0.2))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(Circle())
     }
     
     init(text: Binding<String>, isFocused: Binding<Bool>? = nil, placeholder: String = "🍗", size: CGFloat = 54) {

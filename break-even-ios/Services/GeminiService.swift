@@ -35,7 +35,12 @@ class GeminiService {
                     "parts": [
                         [
                             "text": """
-                            Analyze this receipt image and extract the following information in JSON format.
+                            Look at this image. First determine if it is a receipt, invoice, or bill of any kind.
+                            
+                            If the image is NOT a receipt/invoice/bill, return ONLY this JSON and nothing else:
+                            {"isReceipt": false}
+                            
+                            If the image IS a receipt/invoice/bill, extract the information in JSON format following these rules:
                             
                             IMPORTANT RULES:
                             1. Return ONLY valid JSON, no markdown, no code blocks, no explanations
@@ -43,18 +48,23 @@ class GeminiService {
                             3. quantity must be a number (can be decimal like 1.0)
                             4. If you cannot read a value, use these defaults:
                                - merchantName: "Receipt"
+                               - emoji: "🧾"
                                - items: [] (empty array)
                                - quantity: 1
                                - unitPrice: 0
                                - subtotal: 0
                                - tax: 0
+                               - tip: 0
                                - total: 0
                                - date: "" (empty string)
                             5. NEVER use null - use empty string "" or 0 instead
+                            6. emoji must be a single emoji that best represents the merchant or category (e.g. 🍕 for pizza, 🛒 for grocery, ☕ for coffee shop, 🍺 for bar, ⛽ for gas station, 💊 for pharmacy)
                             
                             Expected JSON structure:
                             {
+                                "isReceipt": true,
                                 "merchantName": "Store Name",
+                                "emoji": "🛒",
                                 "items": [
                                     {
                                         "name": "Item description",
@@ -64,11 +74,12 @@ class GeminiService {
                                 ],
                                 "subtotal": 9.99,
                                 "tax": 0.80,
+                                "tip": 0,
                                 "total": 10.79,
                                 "date": "2025-01-18"
                             }
                             
-                            Now analyze the receipt and return the JSON:
+                            Now analyze the image and return the JSON:
                             """
                         ],
                         [
@@ -133,12 +144,17 @@ class GeminiService {
         do {
             let result = try JSONDecoder().decode(ReceiptAnalysisResult.self, from: jsonData)
             
-            // Debug logging to trace data flow
+            if result.isReceipt == false {
+                throw GeminiError.notAReceipt
+            }
+            
             print("=== Receipt Analysis Result ===")
             print("Merchant: \(result.merchantName ?? "nil")")
+            print("Emoji: \(result.emoji ?? "nil")")
             print("Total: \(result.total ?? 0)")
             print("Subtotal: \(result.subtotal ?? 0)")
             print("Tax: \(result.tax ?? 0)")
+            print("Tip: \(result.tip ?? 0)")
             print("Date: \(result.date ?? "nil")")
             print("Items count: \(result.safeItems.count)")
             for (index, item) in result.safeItems.enumerated() {
@@ -147,6 +163,8 @@ class GeminiService {
             print("==============================")
             
             return result
+        } catch let error as GeminiError {
+            throw error
         } catch {
             print("Receipt JSON parsing error: \(error)")
             print("JSON string was: \(jsonString)")
@@ -183,10 +201,13 @@ struct GeminiPart: Decodable {
 }
 
 struct ReceiptAnalysisResult: Decodable {
+    let isReceipt: Bool?
     let merchantName: String?
-    let items: [ReceiptItem]?  // Made optional to handle null/missing
+    let emoji: String?
+    let items: [ReceiptItem]?
     let subtotal: Double?
     let tax: Double?
+    let tip: Double?
     let total: Double?
     let date: String?
     
@@ -241,7 +262,8 @@ struct ReceiptAnalysisResult: Decodable {
         safeItems.map { item in
             SplitItem(
                 name: item.name,
-                amount: item.unitPrice * item.quantity
+                quantity: max(1, Int(item.quantity)),
+                amount: item.unitPrice
             )
         }
     }
@@ -253,6 +275,7 @@ enum GeminiError: Error, LocalizedError {
     case requestFailed(details: String)
     case noContent
     case parsingFailed(details: String)
+    case notAReceipt
     
     var errorDescription: String? {
         switch self {
@@ -266,6 +289,8 @@ enum GeminiError: Error, LocalizedError {
             return "No content in response"
         case .parsingFailed(let details):
             return "Failed to parse receipt data: \(details)"
+        case .notAReceipt:
+            return "The image does not appear to be a receipt"
         }
     }
 }
