@@ -90,14 +90,29 @@ class HistoryViewModel {
     
     // MARK: - Filtering & Sorting
     
+    private static let dateSearchFormatters: [DateFormatter] = {
+        let short = DateFormatter()
+        short.dateStyle = .medium
+        short.timeStyle = .none
+        
+        let monthYear = DateFormatter()
+        monthYear.dateFormat = "MMMM yyyy"
+        
+        let monthOnly = DateFormatter()
+        monthOnly.dateFormat = "MMMM"
+        
+        let shortMonth = DateFormatter()
+        shortMonth.dateFormat = "MMM d, yyyy"
+        
+        return [short, monthYear, monthOnly, shortMonth]
+    }()
+    
     var filteredTransactions: [EnrichedTransaction] {
         var result = transactions
         
         if !searchText.isEmpty {
-            result = result.filter {
-                $0.title.localizedCaseInsensitiveContains(searchText) ||
-                ($0.description?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
+            let query = searchText
+            result = result.filter { matchesSearch($0, query: query) }
         }
         
         switch sortOrder {
@@ -112,5 +127,49 @@ class HistoryViewModel {
         }
         
         return result
+    }
+    
+    private func matchesSearch(_ transaction: EnrichedTransaction, query: String) -> Bool {
+        if transaction.title.localizedCaseInsensitiveContains(query) { return true }
+        
+        if transaction.description?.localizedCaseInsensitiveContains(query) == true { return true }
+        
+        if transaction.emoji.localizedCaseInsensitiveContains(query) { return true }
+        
+        if let payer = transaction.payer {
+            if payer.name.localizedCaseInsensitiveContains(query) { return true }
+            if payer.displayName.localizedCaseInsensitiveContains(query) { return true }
+        }
+        
+        for split in transaction.splits {
+            if let friend = split.friend {
+                if friend.name.localizedCaseInsensitiveContains(query) { return true }
+                if friend.displayName.localizedCaseInsensitiveContains(query) { return true }
+            }
+        }
+        
+        let date = Date(timeIntervalSince1970: transaction.date / 1000)
+        for formatter in Self.dateSearchFormatters {
+            if formatter.string(from: date).localizedCaseInsensitiveContains(query) { return true }
+        }
+        
+        if let items = transaction.items {
+            for item in items {
+                if item.name.localizedCaseInsensitiveContains(query) { return true }
+            }
+        }
+        
+        if transaction.currency.localizedCaseInsensitiveContains(query) { return true }
+        
+        let amountString = String(format: "%.2f", transaction.totalAmount)
+        if amountString.contains(query) { return true }
+        if transaction.formattedAmount.localizedCaseInsensitiveContains(query) { return true }
+        
+        let methodDisplay = transaction.splitMethod
+            .replacingOccurrences(of: "byItem", with: "by item")
+            .replacingOccurrences(of: "byParts", with: "by parts")
+        if methodDisplay.localizedCaseInsensitiveContains(query) { return true }
+        
+        return false
     }
 }

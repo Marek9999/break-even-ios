@@ -52,6 +52,7 @@ struct break_even_iosApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .preferredColorScheme(.dark)
                 .environment(\.clerk, clerk)
                 .environment(\.convexService, convexService)
                 .onAppear {

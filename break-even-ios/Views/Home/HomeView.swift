@@ -75,8 +75,6 @@ struct HomeView: View {
             )
         }
         .fullScreenCover(item: $receiptScanResult) { result in
-            // This fullScreenCover is specifically for receipt scan results
-            // Using item: binding ensures the data is properly passed when presenting
             NewSplitSheet(
                 receiptResult: result,
                 allFriends: viewModel.allFriends,
@@ -86,12 +84,9 @@ struct HomeView: View {
         }
         .fullScreenCover(isPresented: $showReceiptCamera) {
             ReceiptCameraView { result in
-                // Small delay to allow camera to dismiss before showing split sheet
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    // Setting receiptScanResult will automatically present the fullScreenCover
                     receiptScanResult = result
                     
-                    // Debug logging
                     print("=== HomeView: Receipt Result Set ===")
                     print("Title: \(result.title)")
                     print("Total: \(result.total)")
@@ -149,11 +144,10 @@ struct HomeView: View {
                 isOwedToUser: selectedTab == .owedToYou,
                 currencyCode: viewModel.userCurrency,
                 onPersonTap: { friend in
-                    // Using sheet(item:) so just setting selectedFriend triggers the sheet
                     selectedFriend = currentTabData.first(where: { $0.friend.id == friend.id })
                 }
             )
-            .id(selectedTab) // Force re-render and re-animate on tab change
+            .id(selectedTab)
         }
     }
     
@@ -162,7 +156,6 @@ struct HomeView: View {
     private var actionButtons: some View {
         GlassEffectContainer {
             HStack(spacing: 8) {
-                // New Split Button
                 Button {
                     splitSheetConfig = SplitSheetConfig(preSelectedFriend: nil)
                     let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -180,7 +173,6 @@ struct HomeView: View {
                     .glassEffect(.clear.tint(.accent).interactive())
                 }
                 
-                // Receipt Scanner Button
                 Button {
                     showReceiptCamera = true
                     let generator = UIImpactFeedbackGenerator(style: .medium)

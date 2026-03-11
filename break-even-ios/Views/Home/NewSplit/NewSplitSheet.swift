@@ -33,7 +33,6 @@ struct NewSplitSheet: View {
     @State private var showDeleteSplitAlert = false
     @State private var amountText: String = ""
     @FocusState private var focusedField: Field?
-    @State private var isEmojiFocused: Bool = false
     @State private var isAmountFocused: Bool = false
     @State private var fixedElementsWidth: CGFloat = 0
     @State private var expandedItemIds: Set<UUID> = []
@@ -81,19 +80,11 @@ struct NewSplitSheet: View {
             .onChange(of: focusedField) { _, newValue in
                 if newValue != nil {
                     isAmountFocused = false
-                    isEmojiFocused = false
                 }
             }
             .onChange(of: isAmountFocused) { _, newValue in
                 if newValue {
                     focusedField = nil
-                    isEmojiFocused = false
-                }
-            }
-            .onChange(of: isEmojiFocused) { _, newValue in
-                if newValue {
-                    focusedField = nil
-                    isAmountFocused = false
                 }
             }
             .navigationTitle(viewModel.isEditing ? "Edit Split" : "New Split")
@@ -193,7 +184,6 @@ struct NewSplitSheet: View {
             .onTapGesture {
                 focusedField = nil
                 isAmountFocused = false
-                isEmojiFocused = false
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
         }
@@ -271,7 +261,7 @@ struct NewSplitSheet: View {
     
     private var emojiTitleRow: some View {
         HStack(spacing: 12) {
-            EmojiTextField(text: $viewModel.emoji, isFocused: $isEmojiFocused)
+            EmojiTextField(text: $viewModel.emoji)
                 .frame(width: 56, height: 56)
             
             TextField("Split Name", text: $viewModel.title)

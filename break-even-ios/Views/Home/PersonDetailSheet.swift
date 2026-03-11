@@ -101,6 +101,13 @@ struct PersonDetailSheet: View {
     @State private var cachedAvatarImage: UIImage?
     @Namespace private var olderItemsNamespace
     
+    // Sheet detent navigation control
+    @State private var selectedDetent: PresentationDetent = .medium
+    @State private var navigateToSettle = false
+    @State private var showSplitDetail = false
+    @State private var selectedTransactionForDetail: EnrichedTransaction?
+    @State private var detentsLocked = false
+    
     // Keyboard pre-warming
     @State private var keyboardPrewarmText = ""
     @FocusState private var keyboardPrewarmFocused: Bool
@@ -305,18 +312,8 @@ struct PersonDetailSheet: View {
             
             .safeAreaBar(edge: .bottom) {
                 if displayAmount > 0 {
-                    NavigationLink {
-                        SettleView(
-                            friend: friend,
-                            userName: currentUserName,
-                            userAvatarUrl: clerk.user?.imageUrl,
-                            maxAmount: displayAmount,
-                            currency: userCurrency,
-                            isUserPaying: !owedToMe,
-                            onSettle: { amount, date in
-                                try await settleAmount(amount: amount, date: date)
-                            }
-                        )
+                    Button {
+                        navigateToSettle = true
                     } label: {
                         Text("Settle with \(friend.name.components(separatedBy: " ").first ?? friend.name)")
                             .font(.headline)
@@ -372,6 +369,46 @@ struct PersonDetailSheet: View {
                 // Reset dominant color and cached image when friend changes
                 dominantColor = nil
                 cachedAvatarImage = nil
+            }
+            .navigationDestination(isPresented: $navigateToSettle) {
+                SettleView(
+                    friend: friend,
+                    userName: currentUserName,
+                    userAvatarUrl: clerk.user?.imageUrl,
+                    maxAmount: displayAmount,
+                    currency: userCurrency,
+                    isUserPaying: !owedToMe,
+                    onSettle: { amount, date in
+                        try await settleAmount(amount: amount, date: date)
+                    }
+                )
+            }
+            .navigationDestination(isPresented: $showSplitDetail) {
+                if let tx = selectedTransactionForDetail {
+                    SplitDetailView(transaction: tx, userCurrency: userCurrency)
+                }
+            }
+        }
+        .presentationDetents(detentsLocked ? [.large] : [.medium, .large], selection: $selectedDetent)
+        .presentationDragIndicator(.visible)
+        .onChange(of: showSplitDetail) { _, isShowing in
+            if isShowing {
+                withAnimation(.easeInOut(duration: 0.3)) { selectedDetent = .large }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    detentsLocked = true
+                }
+            } else {
+                detentsLocked = false
+            }
+        }
+        .onChange(of: navigateToSettle) { _, isShowing in
+            if isShowing {
+                withAnimation(.easeInOut(duration: 0.3)) { selectedDetent = .large }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    detentsLocked = true
+                }
+            } else {
+                detentsLocked = false
             }
         }
     }
@@ -532,8 +569,9 @@ struct PersonDetailSheet: View {
     private func activityRow(for item: ActivityItem) -> some View {
         switch item {
         case .transaction(let tx, let originalAmount, let originalCurrency, let isOwed):
-            NavigationLink {
-                SplitDetailView(transaction: tx, userCurrency: userCurrency)
+            Button {
+                selectedTransactionForDetail = tx
+                showSplitDetail = true
             } label: {
                 transactionRow(transaction: tx, originalAmount: originalAmount, originalCurrency: originalCurrency, isOwed: isOwed)
             }
