@@ -62,7 +62,7 @@ struct HomeView: View {
             // Action Buttons
             actionButtons
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 8)
+                .padding(.bottom, 80)
         }
         .background(.background)
         .navigationBarHidden(true)

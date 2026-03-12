@@ -427,6 +427,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Break Even needs camera access to scan receipts for expense splitting.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Break Even needs permission to save receipt images to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Break Even needs photo library access to select receipt images for expense splitting.";
@@ -466,6 +467,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Break Even needs camera access to scan receipts for expense splitting.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Break Even needs permission to save receipt images to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Break Even needs photo library access to select receipt images for expense splitting.";

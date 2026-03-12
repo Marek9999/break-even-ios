@@ -536,6 +536,7 @@ struct SplitDetailView: View {
 
 // MARK: - Previews
 
+#if DEBUG
 #Preview("USD Split") {
     NavigationStack {
         SplitDetailView(
@@ -580,3 +581,4 @@ struct SplitDetailView: View {
         )
     }
 }
+#endif

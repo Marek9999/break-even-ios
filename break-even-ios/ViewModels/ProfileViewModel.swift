@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 import ConvexMobile
 internal import Combine
 
@@ -15,8 +16,16 @@ class ProfileViewModel {
     // UI State
     var showAddContact = false
     var showCurrencyPicker = false
+    var showSignOutConfirmation = false
+    var showPhotoLibrary = false
+    var showCamera = false
+    var isUpdatingPhoto = false
     var error: String?
     var isLoading = false
+    
+    // Avatar / dominant color
+    var cachedAvatarImage: UIImage?
+    var dominantColor: Color?
     
     // Seed sample data state (DEBUG only)
     var isSeedingData = false
@@ -117,6 +126,33 @@ class ProfileViewModel {
     /// Get non-self friends
     var otherFriends: [ConvexFriend] {
         friends.filter { !$0.isSelf }
+    }
+    
+    /// Oldest friends (by createdAt), max 3, for the profile card preview
+    var oldestFriendPreviews: [ConvexFriend] {
+        Array(otherFriends.sorted { $0.createdAt < $1.createdAt }.prefix(3))
+    }
+    
+    /// Load the user's avatar image and extract dominant color
+    func loadAvatarImage(from urlString: String?) async {
+        guard let urlString, let url = URL(string: urlString) else {
+            cachedAvatarImage = nil
+            dominantColor = nil
+            return
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let uiImage = UIImage(data: data) else { return }
+            cachedAvatarImage = uiImage
+            if let color = uiImage.dominantColor() {
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    dominantColor = color
+                }
+            }
+        } catch {
+            // Silently fail -- initials placeholder will remain
+        }
     }
     
     /// Add a new friend

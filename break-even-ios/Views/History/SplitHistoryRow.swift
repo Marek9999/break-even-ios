@@ -45,6 +45,7 @@ struct SplitHistoryRow: View {
     }
 }
 
+#if DEBUG
 #Preview("Single Row") {
     SplitHistoryRow(transaction: .previewDinner)
         .padding()
@@ -66,3 +67,4 @@ struct SplitHistoryRow: View {
     .clipShape(RoundedRectangle(cornerRadius: 20))
     .padding(.horizontal)
 }
+#endif

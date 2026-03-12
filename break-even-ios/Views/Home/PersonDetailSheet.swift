@@ -15,7 +15,6 @@ internal import Combine
 extension UIImage {
     /// Extracts the dominant color from an image by downsampling and analyzing pixel data
     func dominantColor() -> Color? {
-        // Downsample to 10x10 for performance
         let size = CGSize(width: 10, height: 10)
         
         guard let cgImage = self.cgImage else { return nil }
@@ -35,7 +34,6 @@ extension UIImage {
         
         context.draw(cgImage, in: CGRect(origin: .zero, size: size))
         
-        // Count color occurrences (quantize to reduce unique colors)
         var colorCounts: [UInt32: Int] = [:]
         
         for i in stride(from: 0, to: rawData.count, by: 4) {
@@ -44,12 +42,8 @@ extension UIImage {
             let b = rawData[i + 2]
             let a = rawData[i + 3]
             
-            // Skip transparent or nearly white/black pixels
             guard a > 128 else { continue }
-            let brightness = (Int(r) + Int(g) + Int(b)) / 3
-            guard brightness > 30 && brightness < 225 else { continue }
             
-            // Quantize to reduce unique colors (divide by 16 = shift right 4)
             let quantizedR = (r >> 4) << 4
             let quantizedG = (g >> 4) << 4
             let quantizedB = (b >> 4) << 4
@@ -58,7 +52,6 @@ extension UIImage {
             colorCounts[key, default: 0] += 1
         }
         
-        // Find most common color
         guard let dominantKey = colorCounts.max(by: { $0.value < $1.value })?.key else {
             return nil
         }
@@ -67,19 +60,7 @@ extension UIImage {
         let g = CGFloat((dominantKey >> 8) & 0xFF) / 255.0
         let b = CGFloat(dominantKey & 0xFF) / 255.0
         
-        // --- VIBRANCY BOOST ---
-        let uiColor = UIColor(red: r, green: g, blue: b, alpha: 1.0)
-        var h: CGFloat = 0, s: CGFloat = 0, br: CGFloat = 0, a: CGFloat = 0
-        
-        uiColor.getHue(&h, saturation: &s, brightness: &br, alpha: &a)
-        
-        // 1. Boost Saturation: Ensure it's at least 60% saturated
-        let vibrantS = max(s * 1.5, 0.6)
-        
-        // 2. Adjust Brightness: Ensure it's not too dark (at least 50% bright)
-        let vibrantBr = max(br, 0.5)
-        
-        return Color(hue: Double(h), saturation: Double(vibrantS), brightness: Double(vibrantBr))
+        return Color(red: r, green: g, blue: b)
     }
 }
 
