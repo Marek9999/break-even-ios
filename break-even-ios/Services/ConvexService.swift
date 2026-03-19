@@ -49,7 +49,9 @@ final class ClerkAuthProvider: AuthProvider {
                     return tokenResource.jwt
                 }
             } catch {
+                #if DEBUG
                 print("Failed to get Clerk token: \(error)")
+                #endif
             }
             return nil
         }
@@ -125,23 +127,29 @@ final class ConvexService {
     
     private var cancellables = Set<AnyCancellable>()
     
+    /// Set to true when the deployment URL is invalid so callers can show an error.
+    var hasConfigurationError = false
+    
     private init() {
-        // Get and validate the deployment URL
         let deploymentUrl = Configuration.convexDeploymentURL
+        #if DEBUG
         print("🔌 ConvexService initializing with URL: \(deploymentUrl)")
+        #endif
         
-        // Validate URL format
-        guard let url = URL(string: deploymentUrl),
-              url.scheme == "https",
-              let host = url.host,
-              !host.isEmpty else {
-            fatalError("Invalid Convex deployment URL: '\(deploymentUrl)'. Check that ConvexConfiguration.xcconfig has CONVEX_HOST set correctly.")
+        if let url = URL(string: deploymentUrl),
+           url.scheme == "https",
+           let host = url.host,
+           !host.isEmpty {
+            #if DEBUG
+            print("🔌 ConvexService URL validated - host: \(host)")
+            #endif
+        } else {
+            assertionFailure("Invalid Convex deployment URL: '\(deploymentUrl)'. Check that ConvexConfiguration.xcconfig has CONVEX_HOST set correctly.")
+            hasConfigurationError = true
         }
         
-        print("🔌 ConvexService URL validated - host: \(host)")
         client = ConvexClient(deploymentUrl: deploymentUrl)
         
-        // Subscribe to auth state changes
         authProvider.authState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -151,7 +159,9 @@ final class ConvexService {
             }
             .store(in: &cancellables)
         
+        #if DEBUG
         print("🔌 ConvexService initialized successfully")
+        #endif
     }
     
     // MARK: - Auth State Handling
@@ -175,21 +185,15 @@ final class ConvexService {
     
     /// Sync user with Convex after Clerk authentication
     func syncUser(clerk: Clerk) async throws {
-        print("📤 syncUser: Starting...")
-        
         guard let user = clerk.user else {
-            print("📤 syncUser: No user found in Clerk")
             throw ConvexServiceError.notAuthenticated
         }
         
-        // Update auth provider state
         await authProvider.updateAuthState()
         
-        // Get user details from Clerk
         let clerkId = user.id
         let email = user.primaryEmailAddress?.emailAddress ?? ""
         
-        // Construct full name from firstName and lastName
         var name = "User"
         if let firstName = user.firstName {
             name = firstName
@@ -201,9 +205,6 @@ final class ConvexService {
         let phone = user.primaryPhoneNumber?.phoneNumber
         let avatarUrl = user.imageUrl
         
-        print("📤 syncUser: clerkId=\(clerkId), email=\(email), name=\(name)")
-        
-        // Build arguments - only include optional fields if they have values
         // Convex v.optional() accepts undefined (omitted) but NOT null
         var args: [String: String] = [
             "clerkId": clerkId,
@@ -212,7 +213,6 @@ final class ConvexService {
             "defaultCurrency": "USD"
         ]
         
-        // Only add optional fields if they have values
         if let phone = phone, !phone.isEmpty {
             args["phone"] = phone
         }
@@ -220,20 +220,18 @@ final class ConvexService {
             args["avatarUrl"] = avatarUrl
         }
         
-        print("📤 syncUser: Sending args: \(args.keys.joined(separator: ", "))")
-        
-        // Call Convex to get or create user
         do {
             let userId: String = try await client.mutation(
                 "users:getOrCreateUser",
                 with: args
             )
             
-            print("📤 syncUser: Success! userId=\(userId)")
             currentUserId = userId
             isUserSynced = true
         } catch {
+            #if DEBUG
             print("📤 syncUser: Mutation failed with error: \(error)")
+            #endif
             throw error
         }
     }

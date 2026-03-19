@@ -418,12 +418,11 @@ struct ReceiptCameraView: View {
                 image: image
             )
 
+            #if DEBUG
             print("=== Receipt Scan Result Created ===")
-            print("Title: \(scanResult.title)")
-            print("Total: \(scanResult.total)")
-            print("Items: \(scanResult.items.count)")
-            print("Date: \(scanResult.date ?? "nil")")
+            print("Title: \(scanResult.title), Total: \(scanResult.total), Items: \(scanResult.items.count)")
             print("===================================")
+            #endif
 
             await MainActor.run {
                 isAnalyzing = false

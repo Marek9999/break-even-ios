@@ -61,38 +61,30 @@ struct break_even_iosApp: App {
                     KeyboardPrewarmer.prewarm()
                 }
                 .task {
-                    // Configure Clerk
-                    print("🔧 Configuring Clerk...")
                     clerk.configure(publishableKey: Configuration.clerkPublishableKey)
-                    print("🔧 Convex URL: \(Configuration.convexDeploymentURL)")
                     try? await clerk.load()
-                    print("🔧 Clerk loaded, session: \(clerk.session != nil ? "exists" : "nil")")
                     
-                    // If already logged in, sync user
                     if clerk.session != nil {
-                        print("🔧 Session exists on launch, syncing user...")
                         do {
                             try await convexService.syncUser(clerk: clerk)
-                            print("✅ User synced with Convex successfully (on launch)")
                         } catch {
+                            #if DEBUG
                             print("❌ Failed to sync user on launch: \(error)")
+                            #endif
                         }
                     }
                 }
-                .onChange(of: clerk.session) { oldSession, newSession in
-                    // Sync with Convex when auth state changes
-                    print("🔄 Session changed: \(oldSession != nil) -> \(newSession != nil)")
+                .onChange(of: clerk.session) { _, newSession in
                     Task {
                         if newSession != nil {
                             do {
-                                print("🔄 Syncing user with Convex...")
                                 try await convexService.syncUser(clerk: clerk)
-                                print("✅ User synced with Convex successfully")
                             } catch {
+                                #if DEBUG
                                 print("❌ Failed to sync user with Convex: \(error)")
+                                #endif
                             }
                         } else {
-                            print("🔄 Signing out...")
                             await convexService.signOut()
                         }
                     }

@@ -528,7 +528,9 @@ struct SplitDetailView: View {
                     dismiss()
                 }
             } catch {
+                #if DEBUG
                 print("Failed to delete transaction: \(error)")
+                #endif
             }
         }
     }

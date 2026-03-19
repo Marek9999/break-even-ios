@@ -87,11 +87,11 @@ struct HomeView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     receiptScanResult = result
                     
+                    #if DEBUG
                     print("=== HomeView: Receipt Result Set ===")
-                    print("Title: \(result.title)")
-                    print("Total: \(result.total)")
-                    print("Items: \(result.items.count)")
+                    print("Title: \(result.title), Total: \(result.total), Items: \(result.items.count)")
                     print("====================================")
+                    #endif
                 }
             }
         }

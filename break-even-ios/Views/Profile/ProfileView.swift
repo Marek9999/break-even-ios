@@ -574,7 +574,9 @@ struct ProfileView: View {
                     ]
                 )
             } catch {
+                #if DEBUG
                 print("Failed to update currency: \(error)")
+                #endif
             }
         }
     }
@@ -595,7 +597,9 @@ struct ProfileView: View {
             try await convexService.syncUser(clerk: clerk)
             await viewModel.loadAvatarImage(from: clerk.user?.imageUrl)
         } catch {
+            #if DEBUG
             print("Failed to upload profile image: \(error)")
+            #endif
         }
         viewModel.isUpdatingPhoto = false
     }
@@ -608,7 +612,9 @@ struct ProfileView: View {
             viewModel.cachedAvatarImage = nil
             withAnimation { viewModel.dominantColor = nil }
         } catch {
+            #if DEBUG
             print("Failed to remove profile image: \(error)")
+            #endif
         }
         viewModel.isUpdatingPhoto = false
     }
@@ -620,7 +626,9 @@ struct ProfileView: View {
             do {
                 try await clerk.signOut()
             } catch {
+                #if DEBUG
                 print("Failed to sign out: \(error)")
+                #endif
             }
         }
     }

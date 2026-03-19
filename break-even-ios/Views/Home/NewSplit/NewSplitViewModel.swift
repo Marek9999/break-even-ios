@@ -468,9 +468,9 @@ class NewSplitViewModel {
         items = result.items
         splitMethod = .byItem
         
-        print("=== Receipt Data Replaced ===")
-        print("Title: \(title), Emoji: \(emoji), Total: \(totalAmount), Items: \(items.count)")
-        print("=============================")
+        #if DEBUG
+        print("=== Receipt Data Replaced: \(title), Items: \(items.count) ===")
+        #endif
     }
     
     // MARK: - Save Receipt to Photo Library
@@ -480,7 +480,6 @@ class NewSplitViewModel {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         
         guard status == .authorized || status == .limited else {
-            print("=== Photo Library permission denied ===")
             throw NewSplitError.photoLibraryAccessDenied
         }
         
@@ -490,10 +489,8 @@ class NewSplitViewModel {
                 PHAssetCreationRequest.creationRequestForAsset(from: image)
             } completionHandler: { success, error in
                 if success {
-                    print("=== Receipt saved to Photo Library ===")
                     continuation.resume()
                 } else if let error = error {
-                    print("=== Failed to save to Photo Library: \(error) ===")
                     continuation.resume(throwing: error)
                 } else {
                     continuation.resume(throwing: NewSplitError.photoLibrarySaveFailed)
@@ -514,7 +511,9 @@ class NewSplitViewModel {
         // Get upload URL from Convex
         let uploadUrl: String = try await client.mutation("files:generateUploadUrl", with: [String: String]())
         
-        print("=== Upload URL received: \(uploadUrl) ===")
+        #if DEBUG
+        print("=== Upload URL received ===")
+        #endif
         
         // Upload the image
         guard let url = URL(string: uploadUrl) else {
@@ -530,8 +529,6 @@ class NewSplitViewModel {
         
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            print("=== Upload failed with status: \(statusCode) ===")
             throw NewSplitError.uploadFailed
         }
         
@@ -539,16 +536,18 @@ class NewSplitViewModel {
         do {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let storageId = json["storageId"] as? String {
-                print("=== Storage ID received: \(storageId) ===")
                 return storageId
             }
         } catch {
+            #if DEBUG
             print("=== Failed to parse upload response: \(error) ===")
+            #endif
         }
         
-        // Debug: print raw response
+        #if DEBUG
         let responseString = String(data: data, encoding: .utf8) ?? "Unable to decode"
         print("=== Raw upload response: \(responseString) ===")
+        #endif
         
         throw NewSplitError.uploadFailed
     }
@@ -595,7 +594,9 @@ class NewSplitViewModel {
         do {
             rates = try await fetchExchangeRates()
         } catch {
+            #if DEBUG
             print("=== Warning: Could not fetch exchange rates: \(error) ===")
+            #endif
             rates = nil
         }
         
@@ -605,7 +606,9 @@ class NewSplitViewModel {
             do {
                 try await saveReceiptToPhotoLibrary(image: image)
             } catch {
+                #if DEBUG
                 print("=== Warning: Could not save to Photo Library: \(error) ===")
+                #endif
             }
             finalReceiptFileId = try await uploadReceiptImage(image: image)
         }

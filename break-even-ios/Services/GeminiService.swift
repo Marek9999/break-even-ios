@@ -125,8 +125,10 @@ class GeminiService {
             geminiResponse = try JSONDecoder().decode(GeminiResponse.self, from: data)
         } catch {
             // Log the raw response for debugging
+            #if DEBUG
             let responseString = String(data: data, encoding: .utf8) ?? "Unable to decode response"
             print("Gemini raw response: \(responseString)")
+            #endif
             throw GeminiError.parsingFailed(details: "Failed to decode response: \(error.localizedDescription)")
         }
         
@@ -148,26 +150,23 @@ class GeminiService {
                 throw GeminiError.notAReceipt
             }
             
+            #if DEBUG
             print("=== Receipt Analysis Result ===")
             print("Merchant: \(result.merchantName ?? "nil")")
             print("Emoji: \(result.emoji ?? "nil")")
             print("Total: \(result.total ?? 0)")
-            print("Subtotal: \(result.subtotal ?? 0)")
-            print("Tax: \(result.tax ?? 0)")
-            print("Tip: \(result.tip ?? 0)")
-            print("Date: \(result.date ?? "nil")")
             print("Items count: \(result.safeItems.count)")
-            for (index, item) in result.safeItems.enumerated() {
-                print("  Item \(index + 1): \(item.name) - qty: \(item.quantity) @ \(item.unitPrice)")
-            }
             print("==============================")
+            #endif
             
             return result
         } catch let error as GeminiError {
             throw error
         } catch {
+            #if DEBUG
             print("Receipt JSON parsing error: \(error)")
             print("JSON string was: \(jsonString)")
+            #endif
             throw GeminiError.parsingFailed(details: "Invalid receipt format: \(error.localizedDescription)")
         }
     }
