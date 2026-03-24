@@ -629,9 +629,9 @@ private enum ExpandableItemPreviewData {
     struct ItemListPreview: View {
         @State private var expandedId: UUID?
         @State private var items: [SplitItem] = [
-            SplitItem(name: "Margherita Pizza", quantity: 2, amount: 14.99, assignedTo: Set(ExpandableItemPreviewData.allParticipants.prefix(3).map(\.id))),
+            SplitItem(name: "Margherita Pizza", quantity: 2, amount: 14.99, assignedTo: Set(ExpandableItemPreviewData.allParticipants.prefix(3).map { $0.id })),
             SplitItem(name: "Caesar Salad", amount: 9.50),
-            SplitItem(name: "Garlic Bread", amount: 6.00, assignedTo: Set(ExpandableItemPreviewData.allParticipants.prefix(5).map(\.id))),
+            SplitItem(name: "Garlic Bread", amount: 6.00, assignedTo: Set(ExpandableItemPreviewData.allParticipants.prefix(5).map { $0.id })),
             SplitItem(name: "Tiramisu", quantity: 3, amount: 8.75, assignedTo: [ExpandableItemPreviewData.selfFriend.id]),
         ]
         

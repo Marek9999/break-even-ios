@@ -282,7 +282,7 @@ private enum SplitBreakdownPreviewData {
     )
 }
 
-#Preview("Equal Split") {
+private func makeEqualSplitVM() -> NewSplitViewModel {
     let vm = NewSplitViewModel()
     vm.totalAmount = 200.00
     vm.splitMethod = .equal
@@ -293,11 +293,10 @@ private enum SplitBreakdownPreviewData {
         SplitBreakdownPreviewData.friendLisa,
         SplitBreakdownPreviewData.friendKai
     ]
-    return SplitBreakdownView(viewModel: vm)
-        .padding()
+    return vm
 }
 
-#Preview("Unequal Split") {
+private func makeUnequalSplitVM() -> NewSplitViewModel {
     let vm = NewSplitViewModel()
     vm.totalAmount = 200.00
     vm.splitMethod = .unequal
@@ -309,11 +308,10 @@ private enum SplitBreakdownPreviewData {
         SplitBreakdownPreviewData.friendLisa,
         SplitBreakdownPreviewData.friendKai
     ]
-    return SplitBreakdownView(viewModel: vm)
-        .padding()
+    return vm
 }
 
-#Preview("By Parts Split") {
+private func makeByPartsSplitVM() -> NewSplitViewModel {
     let vm = NewSplitViewModel()
     vm.totalAmount = 180.00
     vm.splitMethod = .byParts
@@ -328,6 +326,20 @@ private enum SplitBreakdownPreviewData {
         SplitBreakdownPreviewData.friendJane.id: 2,
         SplitBreakdownPreviewData.friendBob.id: 3
     ]
-    return SplitBreakdownView(viewModel: vm)
+    return vm
+}
+
+#Preview("Equal Split") {
+    SplitBreakdownView(viewModel: makeEqualSplitVM())
+        .padding()
+}
+
+#Preview("Unequal Split") {
+    SplitBreakdownView(viewModel: makeUnequalSplitVM())
+        .padding()
+}
+
+#Preview("By Parts Split") {
+    SplitBreakdownView(viewModel: makeByPartsSplitVM())
         .padding()
 }

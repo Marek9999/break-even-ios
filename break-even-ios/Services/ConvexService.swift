@@ -9,41 +9,32 @@ import Foundation
 import SwiftUI
 import ConvexMobile
 import Clerk
-internal import Combine
 
 // MARK: - Clerk Auth Provider for Convex
 
-/// Custom AuthProvider that integrates Clerk authentication with Convex
-final class ClerkAuthProvider: AuthProvider {
-    private let authStateSubject = CurrentValueSubject<AuthState, Never>(.unauthenticated)
-    private var cancellables = Set<AnyCancellable>()
+/// Bridges Clerk sessions to Convex's authenticated Swift client.
+final class ClerkConvexAuthProvider: ConvexMobile.AuthProvider {
+    typealias T = String
     
-    var authState: AnyPublisher<AuthState, Never> {
-        authStateSubject.eraseToAnyPublisher()
-    }
-    
-    /// Fetch the current JWT token from Clerk
-    func fetchToken(forceRefresh: Bool) async -> String? {
+    /// Fetch the current JWT token from Clerk.
+    func fetchToken(forceRefresh: Bool) async throws -> String {
         guard let session = Clerk.shared.session else {
-            return nil
+            throw ConvexServiceError.notAuthenticated
         }
         
         do {
-            // Try to get token with Convex template first
             let options = Session.GetTokenOptions(template: "convex")
             
             if let tokenResource = try await session.getToken(options) {
                 return tokenResource.jwt
             }
             
-            // Fallback to default session token
             if let tokenResource = try await session.getToken() {
                 return tokenResource.jwt
             }
             
-            return nil
+            throw ConvexServiceError.notAuthenticated
         } catch {
-            // If convex template doesn't exist, try default token
             do {
                 if let tokenResource = try await session.getToken() {
                     return tokenResource.jwt
@@ -53,49 +44,25 @@ final class ClerkAuthProvider: AuthProvider {
                 print("Failed to get Clerk token: \(error)")
                 #endif
             }
-            return nil
+            throw ConvexServiceError.notAuthenticated
         }
     }
     
-    /// Login is handled by Clerk, not by this provider
-    func login() async throws {
-        // Clerk handles login externally via AuthView
-        // This is called after Clerk login to sync state
-        if let token = await fetchToken(forceRefresh: false) {
-            authStateSubject.send(.authenticated(token: token))
-        }
+    func login() async throws -> String {
+        try await fetchToken(forceRefresh: false)
     }
     
-    /// Logout - clear auth state
-    func logout() {
-        authStateSubject.send(.unauthenticated)
+    func loginFromCache() async throws -> String {
+        try await fetchToken(forceRefresh: false)
     }
     
-    /// Update auth state based on Clerk session
-    func updateAuthState() async {
-        if let token = await fetchToken(forceRefresh: false) {
-            authStateSubject.send(.authenticated(token: token))
-        } else {
-            authStateSubject.send(.unauthenticated)
-        }
+    func logout() async throws {
+        // Clerk handles session cleanup; nothing extra needed here.
     }
-}
-
-// MARK: - Auth State
-
-enum AuthState {
-    case unauthenticated
-    case authenticated(token: String)
-    case loading
-}
-
-// MARK: - Auth Provider Protocol
-
-protocol AuthProvider {
-    var authState: AnyPublisher<AuthState, Never> { get }
-    func fetchToken(forceRefresh: Bool) async -> String?
-    func login() async throws
-    func logout()
+    
+    func extractIdToken(from authResult: String) -> String {
+        authResult
+    }
 }
 
 // MARK: - Convex Service
@@ -108,10 +75,10 @@ final class ConvexService {
     static let shared = ConvexService()
     
     /// The Convex client instance
-    let client: ConvexClient
+    let client: ConvexClientWithAuth<String>
     
     /// Auth provider for Clerk integration
-    private let authProvider = ClerkAuthProvider()
+    private let authProvider = ClerkConvexAuthProvider()
     
     /// Track connection status
     var isConnected = false
@@ -121,11 +88,6 @@ final class ConvexService {
     
     /// Current user ID in Convex
     var currentUserId: String?
-    
-    /// Current auth token
-    private var currentToken: String?
-    
-    private var cancellables = Set<AnyCancellable>()
     
     /// Set to true when the deployment URL is invalid so callers can show an error.
     var hasConfigurationError = false
@@ -148,36 +110,25 @@ final class ConvexService {
             hasConfigurationError = true
         }
         
-        client = ConvexClient(deploymentUrl: deploymentUrl)
-        
-        authProvider.authState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                Task { @MainActor in
-                    await self?.handleAuthStateChange(state)
-                }
-            }
-            .store(in: &cancellables)
+        client = ConvexClientWithAuth(
+            deploymentUrl: deploymentUrl,
+            authProvider: authProvider
+        )
         
         #if DEBUG
         print("🔌 ConvexService initialized successfully")
         #endif
     }
     
-    // MARK: - Auth State Handling
+    // MARK: - Authentication Helpers
     
-    private func handleAuthStateChange(_ state: AuthState) async {
-        switch state {
-        case .unauthenticated:
-            currentToken = nil
-            isConnected = false
-            isUserSynced = false
-            currentUserId = nil
-        case .authenticated(let token):
-            currentToken = token
+    private func ensureAuthenticatedClient() async throws {
+        switch await client.loginFromCache() {
+        case .success:
             isConnected = true
-        case .loading:
-            break
+        case .failure(let error):
+            isConnected = false
+            throw error
         }
     }
     
@@ -189,7 +140,7 @@ final class ConvexService {
             throw ConvexServiceError.notAuthenticated
         }
         
-        await authProvider.updateAuthState()
+        try await ensureAuthenticatedClient()
         
         let clerkId = user.id
         let email = user.primaryEmailAddress?.emailAddress ?? ""
@@ -216,9 +167,8 @@ final class ConvexService {
         if let phone = phone, !phone.isEmpty {
             args["phone"] = phone
         }
-        if !avatarUrl.isEmpty {
-            args["avatarUrl"] = avatarUrl
-        }
+        // Always send avatarUrl: use the actual URL or empty string to signal removal
+        args["avatarUrl"] = avatarUrl.isEmpty ? "" : avatarUrl
         
         do {
             let userId: String = try await client.mutation(
@@ -238,7 +188,7 @@ final class ConvexService {
     
     /// Sign out and clear Convex auth
     func signOut() async {
-        authProvider.logout()
+        await client.logout()
         isConnected = false
         isUserSynced = false
         currentUserId = nil
@@ -246,12 +196,12 @@ final class ConvexService {
     
     /// Refresh the Convex auth token from Clerk
     func refreshToken() async throws {
-        await authProvider.updateAuthState()
+        try await ensureAuthenticatedClient()
     }
     
     /// Get current auth token for API calls
     func getAuthToken() async -> String? {
-        return await authProvider.fetchToken(forceRefresh: false)
+        return try? await authProvider.fetchToken(forceRefresh: false)
     }
     
     /// Seed sample data for the current user (for development/testing)

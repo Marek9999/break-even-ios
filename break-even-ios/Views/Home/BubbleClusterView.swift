@@ -527,24 +527,22 @@ struct BubbleView: View {
     
     private var bubbleContent: some View {
         VStack(spacing: -4) {
-            // Avatar
             if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
                 AsyncImage(url: url) { image in
                     image
                         .resizable()
                         .scaledToFill()
                 } placeholder: {
-                    initialsView
+                    fallbackAvatarView
                 }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
                 .padding(2)
                 .glassEffect(.regular.interactive(), in: Circle())
             } else {
-                initialsView
+                fallbackAvatarView
             }
             
-            // Amount in user's currency
             Text(amount.asCurrency(code: currencyCode))
                 .font(.caption)
                 .fontWeight(.semibold)
@@ -576,13 +574,29 @@ struct BubbleView: View {
             }
     }
     
-    private var initialsView: some View {
-        Text(friend.initials)
-            .font(.system(size: size * 0.3, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(isOwedToUser ? Color.accent.opacity(0.6) : Color.appDestructive.opacity(0.6))
-            .clipShape(Circle())
+    private var bubbleCircleColor: Color {
+        if let hex = friend.avatarColor {
+            return AvatarColors.color(forHex: hex)
+        }
+        return isOwedToUser ? Color.accent.opacity(0.6) : Color.appDestructive.opacity(0.6)
+    }
+
+    @ViewBuilder
+    private var fallbackAvatarView: some View {
+        if let emoji = friend.avatarEmoji, !emoji.isEmpty {
+            Text(emoji)
+                .font(.system(size: size * 0.4))
+                .frame(width: size, height: size)
+                .background(bubbleCircleColor)
+                .clipShape(Circle())
+        } else {
+            Text(friend.initials)
+                .font(.system(size: size * 0.3, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(bubbleCircleColor)
+                .clipShape(Circle())
+        }
     }
 }
 

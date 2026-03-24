@@ -296,12 +296,13 @@ struct SettleView: View {
             
             Spacer()
             
-            // Bottom person
             personRow(
                 name: friend.name.components(separatedBy: " ").first ?? friend.name,
                 avatarUrl: friend.avatarUrl,
                 initials: friend.initials,
-                isUser: !isUserPaying
+                isUser: !isUserPaying,
+                emoji: friend.avatarEmoji,
+                avatarColor: friend.avatarColor
             )
         }
         .padding(.vertical, 16)
@@ -310,9 +311,8 @@ struct SettleView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
     
-    private func personRow(name: String, avatarUrl: String?, initials: String, isUser: Bool) -> some View {
+    private func personRow(name: String, avatarUrl: String?, initials: String, isUser: Bool, emoji: String? = nil, avatarColor: String? = nil) -> some View {
         VStack(spacing: 12) {
-            // Avatar
             if let url = avatarUrl, let imageUrl = URL(string: url) {
                 AsyncImage(url: imageUrl) { phase in
                     switch phase {
@@ -323,12 +323,12 @@ struct SettleView: View {
                             .frame(width: 80, height: 80)
                             .clipShape(Circle())
                     default:
-                        initialsAvatar(initials: initials, isUser: isUser)
+                        initialsAvatar(initials: initials, isUser: isUser, emoji: emoji, avatarColor: avatarColor)
                     }
                 }
                 .frame(width: 80, height: 80)
             } else {
-                initialsAvatar(initials: initials, isUser: isUser)
+                initialsAvatar(initials: initials, isUser: isUser, emoji: emoji, avatarColor: avatarColor)
             }
             
             Text(name)
@@ -337,12 +337,27 @@ struct SettleView: View {
         }
     }
     
-    private func initialsAvatar(initials: String, isUser: Bool) -> some View {
-        Text(initials)
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 80, height: 80)
-            .glassEffect(.regular.tint(isUser ? Color.accentColor.opacity(0.6) : Color.accent.opacity(0.4)), in: .circle)
+    @ViewBuilder
+    private func initialsAvatar(initials: String, isUser: Bool, emoji: String? = nil, avatarColor: String? = nil) -> some View {
+        let tintColor: Color = {
+            if !isUser, let hex = avatarColor {
+                return AvatarColors.color(forHex: hex).opacity(0.4)
+            }
+            return isUser ? Color.accentColor.opacity(0.6) : Color.accent.opacity(0.4)
+        }()
+        
+        if !isUser, let emoji = emoji, !emoji.isEmpty {
+            Text(emoji)
+                .font(.system(size: 28))
+                .frame(width: 80, height: 80)
+                .glassEffect(.regular.tint(tintColor), in: .circle)
+        } else {
+            Text(initials)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 80, height: 80)
+                .glassEffect(.regular.tint(tintColor), in: .circle)
+        }
     }
     
     // MARK: - Glass Amount Input Section (Liquid Glass Text)

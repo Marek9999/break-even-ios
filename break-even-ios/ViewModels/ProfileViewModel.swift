@@ -47,11 +47,13 @@ class ProfileViewModel {
     var friends: [ConvexFriend] = []
     var currentUser: ConvexUser?
     var sentInvitations: [EnrichedInvitation] = []
+    var receivedInvitations: [ReceivedInvitation] = []
     
     // Subscriptions
     private var friendsSubscription: Task<Void, Never>?
     private var userSubscription: Task<Void, Never>?
     private var invitationsSubscription: Task<Void, Never>?
+    private var receivedInvitationsSubscription: Task<Void, Never>?
     
     /// Subscribe to friends list
     func subscribeToFriends(clerkId: String) {
@@ -116,16 +118,38 @@ class ProfileViewModel {
         }
     }
     
+    /// Subscribe to received invitations (for in-app accept/deny)
+    func subscribeToReceivedInvitations(clerkId: String) {
+        receivedInvitationsSubscription?.cancel()
+        
+        receivedInvitationsSubscription = Task {
+            let client = ConvexService.shared.client
+            let subscription = client.subscribe(
+                to: "invitations:listReceivedInvitations",
+                with: ["clerkId": clerkId],
+                yielding: [ReceivedInvitation].self
+            )
+            .replaceError(with: [])
+            .values
+            
+            for await invites in subscription {
+                if Task.isCancelled { break }
+                self.receivedInvitations = invites
+            }
+        }
+    }
+    
     /// Unsubscribe from all subscriptions
     func unsubscribe() {
         friendsSubscription?.cancel()
         userSubscription?.cancel()
         invitationsSubscription?.cancel()
+        receivedInvitationsSubscription?.cancel()
     }
     
-    /// Get non-self friends
+    /// Get non-self friends (excludes invite_received since those are shown in invitations section)
     var otherFriends: [ConvexFriend] {
-        friends.filter { !$0.isSelf }
+        friends.filter { !$0.isSelf && $0.inviteStatus != "invite_received" }
     }
     
     /// Oldest friends (by createdAt), max 3, for the profile card preview
@@ -156,11 +180,10 @@ class ProfileViewModel {
     }
     
     /// Add a new friend
-    func addFriend(clerkId: String, name: String, email: String?, phone: String?) async throws -> String {
+    func addFriend(clerkId: String, name: String, email: String?, phone: String?) async throws -> CreateFriendResponse {
         isLoading = true
         defer { isLoading = false }
         
-        // Build args - only include optional fields if they have values
         var args: [String: String] = [
             "clerkId": clerkId,
             "name": name
@@ -173,23 +196,26 @@ class ProfileViewModel {
         }
         
         let client = ConvexService.shared.client
-        let friendId: String = try await client.mutation(
+        let result: CreateFriendResponse = try await client.mutation(
             "friends:createDummyFriend",
             with: args
         )
         
-        return friendId
+        return result
     }
     
     /// Delete a friend
-    func deleteFriend(friendId: String) async throws {
+    func deleteFriend(clerkId: String, friendId: String) async throws {
         isLoading = true
         defer { isLoading = false }
         
         let client = ConvexService.shared.client
         let _: Bool = try await client.mutation(
             "friends:deleteFriend",
-            with: ["friendId": friendId]
+            with: [
+                "clerkId": clerkId,
+                "friendId": friendId
+            ]
         )
     }
     
@@ -218,11 +244,10 @@ class ProfileViewModel {
     }
     
     /// Send friend invitation
-    func sendInvitation(clerkId: String, friendId: String, email: String?, phone: String?) async throws -> String {
+    func sendInvitation(clerkId: String, friendId: String, email: String?, phone: String?) async throws -> CreateInvitationResponse {
         isLoading = true
         defer { isLoading = false }
         
-        // Build args - only include optional fields if they have values
         var args: [String: String] = [
             "clerkId": clerkId,
             "friendId": friendId
@@ -235,18 +260,11 @@ class ProfileViewModel {
         }
         
         let client = ConvexService.shared.client
-        
-        struct InvitationResult: Codable {
-            let invitationId: String
-            let token: String
-            let isExisting: Bool
-        }
-        
-        let result: InvitationResult = try await client.mutation(
+        let result: CreateInvitationResponse = try await client.mutation(
             "invitations:createInvitation",
             with: args
         )
         
-        return result.token
+        return result
     }
 }

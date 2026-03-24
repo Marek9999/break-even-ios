@@ -18,6 +18,8 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     let phone: String?
     let avatarUrl: String?
     private let _defaultCurrency: String?
+    let username: String?
+    let usernameChangedAt: Double?
     let createdAt: Double
     
     var id: String { _id }
@@ -25,6 +27,12 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     /// User's default currency (defaults to USD if not set)
     var defaultCurrency: String {
         _defaultCurrency ?? "USD"
+    }
+    
+    /// Formatted username with @ prefix
+    var displayUsername: String? {
+        guard let username else { return nil }
+        return "@\(username)"
     }
     
     enum CodingKeys: String, CodingKey {
@@ -35,6 +43,8 @@ struct ConvexUser: Codable, Identifiable, Hashable {
         case phone
         case avatarUrl
         case _defaultCurrency = "defaultCurrency"
+        case username
+        case usernameChangedAt
         case createdAt
     }
     
@@ -63,9 +73,42 @@ struct ConvexFriend: Codable, Identifiable, Hashable {
     let email: String?
     let phone: String?
     let avatarUrl: String?
+    let avatarEmoji: String?
+    let avatarColor: String?
     let isDummy: Bool
     let isSelf: Bool
+    let inviteStatus: String?
     let createdAt: Double
+    
+    init(
+        _id: String,
+        ownerId: String,
+        linkedUserId: String? = nil,
+        name: String,
+        email: String? = nil,
+        phone: String? = nil,
+        avatarUrl: String? = nil,
+        avatarEmoji: String? = nil,
+        avatarColor: String? = nil,
+        isDummy: Bool,
+        isSelf: Bool,
+        inviteStatus: String? = nil,
+        createdAt: Double
+    ) {
+        self._id = _id
+        self.ownerId = ownerId
+        self.linkedUserId = linkedUserId
+        self.name = name
+        self.email = email
+        self.phone = phone
+        self.avatarUrl = avatarUrl
+        self.avatarEmoji = avatarEmoji
+        self.avatarColor = avatarColor
+        self.isDummy = isDummy
+        self.isSelf = isSelf
+        self.inviteStatus = inviteStatus
+        self.createdAt = createdAt
+    }
     
     var id: String { _id }
     
@@ -83,7 +126,13 @@ struct ConvexFriend: Codable, Identifiable, Hashable {
     }
     
     var displayName: String {
-        isSelf ? "Me" : name
+        name
+    }
+    
+    var isSelectableForNewSplit: Bool {
+        guard !isSelf else { return false }
+        let status = inviteStatus ?? "none"
+        return status == "accepted" || status == "invite_sent" || status == "none"
     }
 }
 
@@ -132,9 +181,11 @@ struct ConvexTransaction: Codable, Identifiable, Hashable {
     let splitMethod: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
-    let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
+    let exchangeRates: ExchangeRates?
     let date: Double
     let createdAt: Double
+    let lastEditedBy: String?
+    let lastEditedAt: Double?
     
     var id: String { _id }
     
@@ -186,6 +237,13 @@ struct ConvexTransactionItem: Codable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Edit History
+
+struct EditHistoryEntry: Codable, Hashable {
+    let editedByName: String
+    let editedAt: Double
+}
+
 // MARK: - Enriched Transaction (with payer and splits info)
 
 /// Transaction with all related data
@@ -201,13 +259,79 @@ struct EnrichedTransaction: Codable, Identifiable {
     let splitMethod: String
     let receiptFileId: String?
     let items: [ConvexTransactionItem]?
-    let exchangeRates: ExchangeRates?  // Exchange rates snapshot at creation time
+    let exchangeRates: ExchangeRates?
     let date: Double
     let createdAt: Double
+    let lastEditedBy: String?
+    let lastEditedAt: Double?
     let payer: ConvexFriend?
     let splits: [EnrichedSplit]
     let receiptUrl: String?
+    let createdByName: String?
+    let lastEditedByName: String?
+    let enrichedEditHistory: [EditHistoryEntry]?
     
+    let viewerPaid: Bool?
+    let friendPaid: Bool?
+    let friendSplitAmount: Double?
+    let viewerSplitAmount: Double?
+
+    init(
+        _id: String,
+        createdById: String,
+        paidById: String,
+        title: String,
+        emoji: String,
+        description: String? = nil,
+        totalAmount: Double,
+        currency: String,
+        splitMethod: String,
+        receiptFileId: String? = nil,
+        items: [ConvexTransactionItem]? = nil,
+        exchangeRates: ExchangeRates? = nil,
+        date: Double,
+        createdAt: Double,
+        lastEditedBy: String? = nil,
+        lastEditedAt: Double? = nil,
+        payer: ConvexFriend? = nil,
+        splits: [EnrichedSplit],
+        receiptUrl: String? = nil,
+        createdByName: String? = nil,
+        lastEditedByName: String? = nil,
+        enrichedEditHistory: [EditHistoryEntry]? = nil,
+        viewerPaid: Bool? = nil,
+        friendPaid: Bool? = nil,
+        friendSplitAmount: Double? = nil,
+        viewerSplitAmount: Double? = nil
+    ) {
+        self._id = _id
+        self.createdById = createdById
+        self.paidById = paidById
+        self.title = title
+        self.emoji = emoji
+        self.description = description
+        self.totalAmount = totalAmount
+        self.currency = currency
+        self.splitMethod = splitMethod
+        self.receiptFileId = receiptFileId
+        self.items = items
+        self.exchangeRates = exchangeRates
+        self.date = date
+        self.createdAt = createdAt
+        self.lastEditedBy = lastEditedBy
+        self.lastEditedAt = lastEditedAt
+        self.payer = payer
+        self.splits = splits
+        self.receiptUrl = receiptUrl
+        self.createdByName = createdByName
+        self.lastEditedByName = lastEditedByName
+        self.enrichedEditHistory = enrichedEditHistory
+        self.viewerPaid = viewerPaid
+        self.friendPaid = friendPaid
+        self.friendSplitAmount = friendSplitAmount
+        self.viewerSplitAmount = viewerSplitAmount
+    }
+
     var id: String { _id }
     
     var dateValue: Date {
@@ -325,7 +449,7 @@ struct EnrichedInvitation: Codable, Identifiable {
     let expiresAt: Double
     let createdAt: Double
     let friend: ConvexFriend?
-    let isExpired: Bool
+    let serverExpired: Bool?
     
     var id: String { _id }
     
@@ -333,8 +457,97 @@ struct EnrichedInvitation: Codable, Identifiable {
         Date(timeIntervalSince1970: expiresAt / 1000)
     }
     
+    var isExpired: Bool {
+        status == "expired" || serverExpired == true || expiresAtDate < Date()
+    }
+    
     var isPending: Bool {
         status == "pending" && !isExpired
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case _id
+        case senderId
+        case friendId
+        case recipientEmail
+        case recipientPhone
+        case status
+        case token
+        case expiresAt
+        case createdAt
+        case friend
+        case serverExpired = "isExpired"
+    }
+}
+
+// MARK: - Received Invitation (for in-app accept/deny)
+
+struct ReceivedInvitation: Codable, Identifiable {
+    let friendId: String
+    let senderName: String
+    let senderAvatarUrl: String?
+    let senderEmail: String?
+    let invitationId: String?
+    let createdAt: Double
+    
+    var id: String { friendId }
+}
+
+struct EmailLookupResponse: Codable {
+    let exists: Bool
+    let userName: String?
+}
+
+// MARK: - Create Friend Response
+
+struct CreateFriendResponse: Codable {
+    let friendId: String
+    let userExistsOnApp: Bool
+    let isExisting: Bool
+}
+
+// MARK: - Create Invitation Response
+
+struct CreateInvitationResponse: Codable {
+    let invitationId: String
+    let token: String
+    let isExisting: Bool
+    let autoAccepted: Bool
+}
+
+// MARK: - Resend Invitation Response
+
+struct ResendInvitationResponse: Codable {
+    let invitationId: String
+    let token: String
+}
+
+// MARK: - Username
+
+/// Response from setUsername mutation
+struct SetUsernameResponse: Codable {
+    let success: Bool
+    let username: String
+}
+
+/// Response from checkUsernameAvailable query
+struct UsernameAvailabilityResponse: Codable {
+    let available: Bool
+    let reason: String?
+}
+
+/// Public user profile returned by getUserByUsername
+struct PublicUserProfile: Codable, Identifiable {
+    let _id: String
+    let name: String
+    let username: String?
+    let avatarUrl: String?
+    
+    var id: String { _id }
+    
+    var displayUsername: String? {
+        guard let username else { return nil }
+        return "@\(username)"
     }
 }
 

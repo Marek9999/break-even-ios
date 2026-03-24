@@ -9,6 +9,7 @@ import SwiftUI
 
 struct NewSplitBottomBar: View {
     let isEditing: Bool
+    let canDelete: Bool
     let isValid: Bool
     let isLoading: Bool
     let hasReceiptImage: Bool
@@ -35,17 +36,22 @@ struct NewSplitBottomBar: View {
 
     private var editModeBar: some View {
         HStack {
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.destructive)
+            if canDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.destructive)
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    .regular.interactive().tint(.appDestructive.opacity(0.15)),
+                    in: .circle
+                )
+            } else {
+                Color.clear
                     .frame(width: buttonSize, height: buttonSize)
             }
-            .buttonStyle(.plain)
-            .glassEffect(
-                .regular.interactive().tint(.appDestructive.opacity(0.15)),
-                in: .circle
-            )
 
             Spacer()
 

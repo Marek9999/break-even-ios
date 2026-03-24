@@ -115,11 +115,8 @@ struct HomeView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .onAppear {
+        .task(id: clerk.user?.id) {
             startSubscriptions()
-        }
-        .onDisappear {
-            viewModel.unsubscribe()
         }
     }
     

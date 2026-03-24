@@ -28,8 +28,16 @@ struct ProfileView: View {
     @State private var viewModel = ProfileViewModel()
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var navigationPath = NavigationPath()
+    @State private var showEditName = false
+    @State private var editedName = ""
+    @State private var showEditUsername = false
+    @State private var editedUsername = ""
+    @State private var usernameError: String?
     
     private var displayName: String {
+        if let convexName = viewModel.currentUser?.name, !convexName.isEmpty {
+            return convexName
+        }
         if let user = clerk.user {
             let first = user.firstName ?? ""
             let last = user.lastName ?? ""
@@ -39,7 +47,7 @@ struct ProfileView: View {
                 return email
             }
         }
-        return viewModel.currentUser?.name ?? "User"
+        return "User"
     }
     
     private var userEmail: String {
@@ -119,6 +127,29 @@ struct ProfileView: View {
             } message: {
                 Text("Are you sure you want to sign out of your account?")
             }
+            .alert("Edit Name", isPresented: $showEditName) {
+                TextField("Your name", text: $editedName)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") { saveEditedName() }
+            } message: {
+                Text("Enter your display name")
+            }
+            .alert("Edit Username", isPresented: $showEditUsername) {
+                TextField("username", text: $editedUsername)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                Button("Cancel", role: .cancel) { }
+                Button("Save") { saveEditedUsername() }
+                    .disabled(!usernameEditAllowed)
+            } message: {
+                if let cooldown = usernameCooldownText {
+                    Text(cooldown)
+                } else if let error = usernameError {
+                    Text(error)
+                } else {
+                    Text("Enter your new username (3-20 characters, letters, numbers, underscores)")
+                }
+            }
             #if DEBUG
             .alert("Nuke All Data?", isPresented: $viewModel.showClearConfirmation) {
                 Button("Cancel", role: .cancel) { }
@@ -132,8 +163,9 @@ struct ProfileView: View {
                     isDetailShowing = newCount > 0
                 }
             }
-            .onAppear { startSubscriptions() }
-            .onDisappear { viewModel.unsubscribe() }
+            .task(id: clerk.user?.id) {
+                startSubscriptions()
+            }
             .task(id: clerk.user?.imageUrl) {
                 await viewModel.loadAvatarImage(from: clerk.user?.imageUrl)
             }
@@ -233,11 +265,80 @@ struct ProfileView: View {
     
     private var infoSection: some View {
         VStack(spacing: 0) {
-            infoRow(label: "User Name", value: displayName)
+            Button {
+                editedName = displayName
+                showEditName = true
+            } label: {
+                HStack {
+                    Text("User Name")
+                        .foregroundStyle(.text.opacity(0.6))
+                    Spacer()
+                    Text(displayName)
+                        .fontWeight(.medium)
+                    Image(systemName: "pencil")
+                        .font(.caption)
+                        .foregroundStyle(.text.opacity(0.4))
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Divider().padding(.horizontal)
+            
+            Button {
+                editedUsername = viewModel.currentUser?.username ?? ""
+                usernameError = nil
+                showEditUsername = true
+            } label: {
+                HStack {
+                    Text("Username")
+                        .foregroundStyle(.text.opacity(0.6))
+                    Spacer()
+                    if let displayUsername = viewModel.currentUser?.displayUsername {
+                        Text(displayUsername)
+                            .fontWeight(.medium)
+                            .font(.body.monospaced())
+                    } else {
+                        Text("Not set")
+                            .foregroundStyle(.secondary)
+                    }
+                    if usernameEditAllowed {
+                        Image(systemName: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.text.opacity(0.4))
+                    } else {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.text.opacity(0.3))
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            
             Divider().padding(.horizontal)
             infoRow(label: "Email", value: userEmail)
         }
         .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+    }
+    
+    private var usernameEditAllowed: Bool {
+        guard let changedAt = viewModel.currentUser?.usernameChangedAt else { return true }
+        let hoursSince = (Date().timeIntervalSince1970 * 1000 - changedAt) / (1000 * 60 * 60)
+        return hoursSince >= 48
+    }
+    
+    private var usernameCooldownText: String? {
+        guard let changedAt = viewModel.currentUser?.usernameChangedAt else { return nil }
+        let hoursSince = (Date().timeIntervalSince1970 * 1000 - changedAt) / (1000 * 60 * 60)
+        if hoursSince < 48 {
+            let remaining = Int(ceil(48 - hoursSince))
+            return "You can change your username again in \(remaining) hour\(remaining == 1 ? "" : "s")"
+        }
+        return nil
     }
     
     private func infoRow(label: String, value: String) -> some View {
@@ -542,7 +643,7 @@ struct ProfileView: View {
     private func profileDestinationView(for destination: ProfileDestination) -> some View {
         switch destination {
         case .friends:
-            ContactsListView(friends: viewModel.otherFriends)
+            ContactsListView(viewModel: viewModel)
         #if DEBUG
         case .shaderTest:
             ShaderTestView()
@@ -558,6 +659,8 @@ struct ProfileView: View {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToFriends(clerkId: clerkId)
         viewModel.subscribeToUser(clerkId: clerkId)
+        viewModel.subscribeToInvitations(clerkId: clerkId)
+        viewModel.subscribeToReceivedInvitations(clerkId: clerkId)
     }
     
     // MARK: - Currency Update
@@ -577,6 +680,55 @@ struct ProfileView: View {
                 #if DEBUG
                 print("Failed to update currency: \(error)")
                 #endif
+            }
+        }
+    }
+    
+    private func saveEditedName() {
+        let trimmed = editedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let clerkId = clerk.user?.id else { return }
+        Task {
+            do {
+                // Split into first/last for Clerk (first word = first name, rest = last name)
+                let parts = trimmed.split(separator: " ", maxSplits: 1)
+                let firstName = String(parts.first ?? Substring(trimmed))
+                let lastName = parts.count > 1 ? String(parts[1]) : ""
+
+                let _ = try await clerk.user?.update(.init(firstName: firstName, lastName: lastName))
+
+                try await viewModel.updateProfile(
+                    clerkId: clerkId,
+                    name: trimmed,
+                    phone: nil,
+                    defaultCurrency: nil
+                )
+            } catch {
+                #if DEBUG
+                print("Failed to update name: \(error)")
+                #endif
+            }
+        }
+    }
+    
+    private func saveEditedUsername() {
+        let trimmed = editedUsername.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let clerkId = clerk.user?.id else { return }
+        
+        Task {
+            do {
+                let _: SetUsernameResponse = try await convexService.client.mutation(
+                    "users:setUsername",
+                    with: [
+                        "clerkId": clerkId,
+                        "username": trimmed,
+                    ]
+                )
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                await MainActor.run {
+                    usernameError = error.localizedDescription
+                    showEditUsername = true
+                }
             }
         }
     }

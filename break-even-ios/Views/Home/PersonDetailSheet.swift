@@ -73,6 +73,7 @@ struct PersonDetailSheet: View {
     let balance: BalanceSummary
     let onStartSplit: (ConvexFriend) -> Void
     
+    @State private var liveBalance: BalanceSummary?
     @State private var transactions: [EnrichedTransaction] = []
     @State private var settlements: [EnrichedSettlement] = []
     @State private var scrollOffset: CGFloat = -74
@@ -98,16 +99,20 @@ struct PersonDetailSheet: View {
         return progress
     }
     
+    private var currentBalance: BalanceSummary {
+        liveBalance ?? balance
+    }
+    
     private var owedToMe: Bool {
-        balance.isOwedToUser
+        currentBalance.isOwedToUser
     }
     
     private var displayAmount: Double {
-        balance.displayAmount
+        currentBalance.displayAmount
     }
     
     private var userCurrency: String {
-        balance.userCurrency
+        currentBalance.userCurrency
     }
     
     /// Current user's display name from Clerk
@@ -126,39 +131,25 @@ struct PersonDetailSheet: View {
     // MARK: - Activity Items (Combined Feed)
     
     /// Combined activity feed with transactions and settlements sorted by date descending
-    /// Shows ORIGINAL amounts (not remaining) - settlements in the timeline show balance changes
+    /// Uses server-computed viewerPaid/friendPaid and resolved split amounts
+    /// to correctly handle shared transactions across users.
     private var activityItems: [ActivityItem] {
         var items: [ActivityItem] = []
         
-        // Add transactions - use ORIGINAL amounts, not remaining
         for transaction in transactions {
-            let friendPaid = transaction.paidById == friend.id
-            let userPaid = transaction.payer?.isSelf == true
             let txCurrency = transaction.currency
             
-            if userPaid {
-                // User paid - look for friend's split (friend owes user)
-                if let friendSplit = transaction.splits.first(where: { $0.friendId == friend.id }) {
-                    let originalAmount = friendSplit.amount  // Use ORIGINAL amount
-                    items.append(.transaction(transaction, originalAmount: originalAmount, originalCurrency: txCurrency, isOwed: true))
-                }
-            }
-            
-            if friendPaid {
-                // Friend paid - look for user's split (user owes friend)
-                if let userSplit = transaction.splits.first(where: { $0.friend?.isSelf == true }) {
-                    let originalAmount = userSplit.amount  // Use ORIGINAL amount
-                    items.append(.transaction(transaction, originalAmount: originalAmount, originalCurrency: txCurrency, isOwed: false))
-                }
+            if transaction.viewerPaid == true, let amount = transaction.friendSplitAmount {
+                items.append(.transaction(transaction, originalAmount: amount, originalCurrency: txCurrency, isOwed: true))
+            } else if transaction.friendPaid == true, let amount = transaction.viewerSplitAmount {
+                items.append(.transaction(transaction, originalAmount: amount, originalCurrency: txCurrency, isOwed: false))
             }
         }
         
-        // Add settlements
         for settlement in settlements {
             items.append(.settlement(settlement))
         }
         
-        // Sort by date descending (newest first)
         return items.sorted { $0.sortTimestamp > $1.sortTimestamp }
     }
     
@@ -336,7 +327,7 @@ struct PersonDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 loadActivity()
-                // Pre-warm keyboard system to avoid first-use lag
+                extractDominantColorIfNeeded()
                 prewarmKeyboard()
             }
             .background {
@@ -400,7 +391,6 @@ struct PersonDetailSheet: View {
         guard let clerkId = clerk.user?.id else { return }
         
         Task {
-            // Use subscribe + first value pattern since ConvexMobile has no query() method
             let subscription = convexService.client.subscribe(
                 to: "transactions:getActivityWithFriend",
                 with: [
@@ -412,11 +402,31 @@ struct PersonDetailSheet: View {
             .replaceError(with: ActivityWithFriendResponse(transactions: [], settlements: [], userCurrency: "USD"))
             .values
             
-            var iterator = subscription.makeAsyncIterator()
-            if let response = await iterator.next() {
+            for await response in subscription {
+                if Task.isCancelled { break }
                 await MainActor.run {
                     self.transactions = response.transactions
                     self.settlements = response.settlements
+                }
+            }
+        }
+        
+        Task {
+            let subscription = convexService.client.subscribe(
+                to: "transactions:getBalanceWithFriend",
+                with: [
+                    "clerkId": clerkId,
+                    "friendId": friend.id
+                ],
+                yielding: BalanceSummary.self
+            )
+            .replaceError(with: balance)
+            .values
+            
+            for await updatedBalance in subscription {
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    self.liveBalance = updatedBalance
                 }
             }
         }
@@ -697,6 +707,14 @@ struct PersonDetailSheet: View {
         }
     }
     
+    private func extractDominantColorIfNeeded() {
+        guard dominantColor == nil, friend.avatarUrl == nil,
+              let hex = friend.avatarColor else { return }
+        withAnimation(.easeInOut(duration: 0.3)) {
+            dominantColor = AvatarColors.color(forHex: hex)
+        }
+    }
+    
     private func loadAvatarImage(from url: URL) async {
         let capturedFriendId = friend.id
         
@@ -721,12 +739,21 @@ struct PersonDetailSheet: View {
         }
     }
     
+    @ViewBuilder
     private func initialsView(size: CGFloat, fontSize: CGFloat) -> some View {
-        Text(friend.initials)
-            .font(.system(size: fontSize, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .glassEffect(.regular.tint(Color.accent.opacity(0.4)), in: .circle)
+        let glassColor = friend.avatarColor.map { AvatarColors.color(forHex: $0).opacity(0.4) } ?? Color.accent.opacity(0.4)
+        if let emoji = friend.avatarEmoji, !emoji.isEmpty {
+            Text(emoji)
+                .font(.system(size: fontSize * 1.4))
+                .frame(width: size, height: size)
+                .glassEffect(.regular.tint(glassColor), in: .circle)
+        } else {
+            Text(friend.initials)
+                .font(.system(size: fontSize, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .glassEffect(.regular.tint(glassColor), in: .circle)
+        }
     }
     
 }
@@ -1546,11 +1573,20 @@ private struct PersonDetailSheetPreviewContent: View {
         }
     }
     
+    @ViewBuilder
     private func initialsView(size: CGFloat, fontSize: CGFloat) -> some View {
-        Text(friend.initials)
-            .font(.system(size: fontSize, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .glassEffect(.regular.tint(Color.accent.opacity(0.4)), in: .circle)
+        let glassColor = friend.avatarColor.map { AvatarColors.color(forHex: $0).opacity(0.4) } ?? Color.accent.opacity(0.4)
+        if let emoji = friend.avatarEmoji, !emoji.isEmpty {
+            Text(emoji)
+                .font(.system(size: fontSize * 1.4))
+                .frame(width: size, height: size)
+                .glassEffect(.regular.tint(glassColor), in: .circle)
+        } else {
+            Text(friend.initials)
+                .font(.system(size: fontSize, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .glassEffect(.regular.tint(glassColor), in: .circle)
+        }
     }
 }

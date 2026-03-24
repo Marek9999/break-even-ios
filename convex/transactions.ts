@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
+import { getAuthenticatedUser, isSplitSelectableStatus, requireOwner } from "./lib/auth";
 
 // Exchange rates validator for the supported currencies
 const exchangeRatesValidator = v.optional(
@@ -18,6 +19,126 @@ const exchangeRatesValidator = v.optional(
     fetchedAt: v.number(),
   })
 );
+
+async function getOwnedFriend(
+  ctx: any,
+  ownerId: Id<"users">,
+  friendId: Id<"friends">
+): Promise<Doc<"friends">> {
+  const friend = await ctx.db.get(friendId);
+  if (!friend) {
+    throw new Error("Friend not found");
+  }
+
+  requireOwner(friend.ownerId, ownerId);
+  return friend;
+}
+
+function assertUsableSplitFriend(friend: Doc<"friends">) {
+  const status = friend.inviteStatus ?? "none";
+  if (!friend.isSelf && !isSplitSelectableStatus(status)) {
+    throw new Error("This friend is no longer available for new splits");
+  }
+}
+
+async function validateOwnedTransactionTargets(
+  ctx: any,
+  ownerId: Id<"users">,
+  paidById: Id<"friends">,
+  splitFriendIds: Id<"friends">[],
+  itemAssignedIds: Id<"friends">[] = []
+) {
+  const friendIds = new Set<string>([
+    paidById,
+    ...splitFriendIds,
+    ...itemAssignedIds,
+  ].map((id) => id.toString()));
+
+  const friends = new Map<string, Doc<"friends">>();
+  for (const friendId of friendIds) {
+    const ownedFriend = await getOwnedFriend(ctx, ownerId, friendId as Id<"friends">);
+    friends.set(friendId, ownedFriend);
+  }
+
+  const payer = friends.get(paidById.toString());
+  if (!payer) {
+    throw new Error("Payer not found");
+  }
+  assertUsableSplitFriend(payer);
+
+  for (const friendId of splitFriendIds) {
+    const friend = friends.get(friendId.toString());
+    if (!friend) {
+      throw new Error("Split participant not found");
+    }
+    assertUsableSplitFriend(friend);
+  }
+
+  for (const friendId of itemAssignedIds) {
+    const friend = friends.get(friendId.toString());
+    if (!friend) {
+      throw new Error("Assigned friend not found");
+    }
+    assertUsableSplitFriend(friend);
+  }
+}
+
+async function requireTransactionAccess(
+  ctx: any,
+  userId: Id<"users">,
+  transactionId: Id<"transactions">
+) {
+  const transaction = await ctx.db.get(transactionId);
+  if (!transaction) {
+    throw new Error("Transaction not found");
+  }
+
+  if (transaction.createdById === userId) {
+    return transaction;
+  }
+
+  const participant = await ctx.db
+    .query("transactionParticipants")
+    .withIndex("by_user_transaction", (q: any) =>
+      q.eq("userId", userId).eq("transactionId", transactionId)
+    )
+    .unique();
+
+  if (!participant) {
+    throw new Error("Not authorized to access this transaction");
+  }
+
+  return transaction;
+}
+
+async function assertFriendOwnedByUser(
+  ctx: any,
+  friendId: Id<"friends">,
+  ownerId: Id<"users">,
+  fieldName: string
+) {
+  const friend = await ctx.db.get(friendId);
+  if (!friend) {
+    throw new Error(`${fieldName} friend not found`);
+  }
+
+  if (friend.ownerId.toString() !== ownerId.toString()) {
+    throw new Error(`${fieldName} must belong to the authenticated user`);
+  }
+
+  return friend;
+}
+
+async function assertFriendIdsOwnedByUser(
+  ctx: any,
+  friendIds: Id<"friends">[],
+  ownerId: Id<"users">,
+  fieldName: string
+) {
+  for (const friendId of friendIds) {
+    await assertFriendOwnedByUser(ctx, friendId, ownerId, fieldName);
+  }
+}
 
 /**
  * Create a new transaction with splits
@@ -56,14 +177,14 @@ export const createTransaction = mutation({
     exchangeRates: exchangeRatesValidator,
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
+    await validateOwnedTransactionTargets(
+      ctx,
+      user._id,
+      args.paidById,
+      args.splits.map((split) => split.friendId),
+      args.items?.flatMap((item) => item.assignedToIds) ?? []
+    );
 
     // Create the transaction
     const transactionId = await ctx.db.insert("transactions", {
@@ -93,9 +214,84 @@ export const createTransaction = mutation({
       });
     }
 
+    // Create transactionParticipants
+    await syncTransactionParticipants(ctx, transactionId, user._id, args.splits.map(s => s.friendId));
+
     return transactionId;
   },
 });
+
+/**
+ * Sync transactionParticipants for a transaction.
+ * Inserts rows for the creator and any linked+accepted friend participants.
+ */
+async function syncTransactionParticipants(
+  ctx: any,
+  transactionId: any,
+  creatorUserId: any,
+  friendIds: any[]
+) {
+  const addedUserIds = new Set<string>();
+
+  // Always add the creator
+  const existingCreator = await ctx.db
+    .query("transactionParticipants")
+    .withIndex("by_user_transaction", (q: any) =>
+      q.eq("userId", creatorUserId).eq("transactionId", transactionId)
+    )
+    .unique();
+
+  if (!existingCreator) {
+    await ctx.db.insert("transactionParticipants", {
+      transactionId,
+      userId: creatorUserId,
+      role: "creator",
+      addedAt: Date.now(),
+    });
+  }
+  addedUserIds.add(creatorUserId);
+
+  // Add linked+accepted participants (resolve self-friends via ownerId)
+  for (const friendId of friendIds) {
+    const friend = await ctx.db.get(friendId);
+    if (!friend) continue;
+
+    const userId = resolveToUserId(friend);
+    if (!userId) continue;
+    if (addedUserIds.has(userId)) continue;
+    if (!friend.isSelf && friend.inviteStatus !== "accepted") continue;
+
+    const existing = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_user_transaction", (q: any) =>
+        q.eq("userId", userId).eq("transactionId", transactionId)
+      )
+      .unique();
+
+    if (!existing) {
+      await ctx.db.insert("transactionParticipants", {
+        transactionId,
+        userId,
+        role: "participant",
+        addedAt: Date.now(),
+      });
+    }
+    addedUserIds.add(userId);
+  }
+
+  // Remove participants no longer in the split (except creator)
+  const allParticipants = await ctx.db
+    .query("transactionParticipants")
+    .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
+    .collect();
+
+  for (const p of allParticipants) {
+    if (p.role === "creator") continue;
+    if (!addedUserIds.has(p.userId)) {
+      await ctx.db.delete(p._id);
+    }
+  }
+}
 
 /**
  * Create a new transaction from JSON strings (for iOS compatibility)
@@ -117,14 +313,7 @@ export const createTransactionFromJson = mutation({
     exchangeRatesJson: v.optional(v.string()), // JSON string of exchange rates
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
     // Parse the paidById
     const paidById = args.paidById as Id<"friends">;
@@ -181,6 +370,13 @@ export const createTransactionFromJson = mutation({
       unitPrice: item.unitPrice,
       assignedToIds: item.assignedToIds.map((id) => id as Id<"friends">),
     }));
+    await validateOwnedTransactionTargets(
+      ctx,
+      user._id,
+      paidById,
+      splits.map((split) => split.friendId as Id<"friends">),
+      convertedItems?.flatMap((item) => item.assignedToIds) ?? []
+    );
 
     // Create the transaction
     const transactionId = await ctx.db.insert("transactions", {
@@ -201,8 +397,10 @@ export const createTransactionFromJson = mutation({
     });
 
     // Create splits for each participant
+    const splitFriendIds: Id<"friends">[] = [];
     for (const split of splits) {
       const friendId = split.friendId as Id<"friends">;
+      splitFriendIds.push(friendId);
 
       await ctx.db.insert("splits", {
         transactionId,
@@ -213,37 +411,49 @@ export const createTransactionFromJson = mutation({
       });
     }
 
+    // Create transactionParticipants
+    await syncTransactionParticipants(ctx, transactionId, user._id, splitFriendIds);
+
     return transactionId;
   },
 });
 
-
 /**
- * List all transactions for a user
+ * List all transactions for a user (own + shared via transactionParticipants)
  */
 export const listTransactions = query({
   args: {
     clerkId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      return [];
-    }
-
-    const transactions = await ctx.db
+    // Get own transactions
+    const ownTransactions = await ctx.db
       .query("transactions")
       .withIndex("by_creator", (q) => q.eq("createdById", user._id))
-      .order("desc")
       .collect();
+
+    // Get shared transactions via transactionParticipants
+    const participantRows = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    const ownTxIds = new Set(ownTransactions.map((t) => t._id));
+    const sharedTransactions = [];
+    for (const p of participantRows) {
+      if (ownTxIds.has(p.transactionId)) continue;
+      const tx = await ctx.db.get(p.transactionId);
+      if (tx) sharedTransactions.push(tx);
+    }
+
+    const allTransactions = [...ownTransactions, ...sharedTransactions];
+    allTransactions.sort((a, b) => b.date - a.date);
 
     // Enrich transactions with splits and payer info
     const enrichedTransactions = await Promise.all(
-      transactions.map(async (transaction) => {
+      allTransactions.map(async (transaction) => {
         const splits = await ctx.db
           .query("splits")
           .withIndex("by_transaction", (q) =>
@@ -261,10 +471,23 @@ export const listTransactions = query({
           })
         );
 
+        // Resolve creator name
+        const creator = await ctx.db.get(transaction.createdById);
+        const createdByName = creator?.name;
+
+        // Resolve lastEditedBy name
+        let lastEditedByName: string | undefined;
+        if (transaction.lastEditedBy) {
+          const editor = await ctx.db.query("users").filter(q => q.eq(q.field("_id"), transaction.lastEditedBy!)).unique();
+          if (editor) lastEditedByName = editor.name;
+        }
+
         return {
           ...transaction,
           payer,
           splits: enrichedSplits,
+          createdByName,
+          lastEditedByName,
         };
       })
     );
@@ -281,10 +504,12 @@ export const getTransactionDetail = query({
     transactionId: v.id("transactions"),
   },
   handler: async (ctx, args) => {
-    const transaction = await ctx.db.get(args.transactionId);
-    if (!transaction) {
-      return null;
-    }
+    const user = await getAuthenticatedUser(ctx);
+    const transaction = await requireTransactionAccess(
+      ctx,
+      user._id,
+      args.transactionId
+    );
 
     const splits = await ctx.db
       .query("splits")
@@ -307,17 +532,43 @@ export const getTransactionDetail = query({
       receiptUrl = await ctx.storage.getUrl(transaction.receiptFileId);
     }
 
+    // Resolve creator name
+    const creator = (await ctx.db.get(transaction.createdById)) as Doc<"users"> | null;
+    const createdByName = creator?.name;
+
+    // Resolve lastEditedBy name (backward compat)
+    let lastEditedByName: string | undefined;
+    if (transaction.lastEditedBy) {
+      const editor = (await ctx.db.get(transaction.lastEditedBy)) as Doc<"users"> | null;
+      if (editor) lastEditedByName = editor.name;
+    }
+
+    // Enrich full edit history with user names
+    const enrichedEditHistory = await Promise.all(
+      (transaction.editHistory ?? []).map(async (entry: { editedBy: Id<"users">; editedAt: number }) => {
+        const editor = (await ctx.db.get(entry.editedBy)) as Doc<"users"> | null;
+        return {
+          editedByName: editor?.name ?? "Unknown",
+          editedAt: entry.editedAt,
+        };
+      })
+    );
+
     return {
       ...transaction,
       payer,
       splits: enrichedSplits,
       receiptUrl,
+      createdByName,
+      lastEditedByName,
+      enrichedEditHistory,
     };
   },
 });
 
 /**
- * Get transactions involving a specific friend
+ * Get transactions involving a specific friend.
+ * Includes shared transactions created by either user via transactionParticipants.
  */
 export const getTransactionsWithFriend = query({
   args: {
@@ -325,72 +576,12 @@ export const getTransactionsWithFriend = query({
     friendId: v.id("friends"),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      return [];
-    }
+    const friend = await ctx.db.get(args.friendId);
+    const friendUserId = friend ? resolveToUserId(friend) : undefined;
 
-    // Get self friend
-    const selfFriend = await ctx.db
-      .query("friends")
-      .withIndex("by_owner_isSelf", (q) =>
-        q.eq("ownerId", user._id).eq("isSelf", true)
-      )
-      .unique();
-
-    if (!selfFriend) {
-      return [];
-    }
-
-    // Get all splits for this friend
-    const friendSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
-
-    // Get unique transaction IDs
-    const transactionIds = [...new Set(friendSplits.map((s) => s.transactionId))];
-
-    // Fetch transactions and filter to only include those created by this user
-    const transactions = [];
-    for (const txId of transactionIds) {
-      const tx = await ctx.db.get(txId);
-      if (tx && tx.createdById === user._id) {
-        const payer = await ctx.db.get(tx.paidById);
-        const splits = await ctx.db
-          .query("splits")
-          .withIndex("by_transaction", (q) => q.eq("transactionId", txId))
-          .collect();
-
-        const enrichedSplits = await Promise.all(
-          splits.map(async (split) => {
-            const friend = await ctx.db.get(split.friendId);
-            return { ...split, friend };
-          })
-        );
-
-        // Calculate if this transaction involves both user and friend
-        const involvesUser = splits.some((s) => s.friendId === selfFriend._id);
-        const involvesFriend = splits.some((s) => s.friendId === args.friendId);
-
-        if (involvesUser && involvesFriend) {
-          transactions.push({
-            ...tx,
-            payer,
-            splits: enrichedSplits,
-          });
-        }
-      }
-    }
-
-    // Sort by date descending
-    transactions.sort((a, b) => b.date - a.date);
-
-    return transactions;
+    return await collectTransactionsWithFriend(ctx, user._id, friendUserId, args.friendId);
   },
 });
 
@@ -398,145 +589,50 @@ export const getTransactionsWithFriend = query({
 
 /**
  * Settle a specific amount with a friend
- * Creates a settlement record without modifying splits
+ * Creates a settlement record without modifying splits.
+ * Uses transactionParticipants for accurate cross-user balance calculation.
  */
 export const settleAmount = mutation({
   args: {
     clerkId: v.string(),
     friendId: v.id("friends"),
-    amount: v.string(), // Amount as string for iOS compatibility
+    amount: v.string(),
     currency: v.string(),
-    direction: v.string(), // "to_friend" (user pays) or "from_friend" (friend pays user)
+    direction: v.string(),
     note: v.optional(v.string()),
     exchangeRatesJson: v.optional(v.string()),
-    settledAt: v.optional(v.string()), // Custom settlement date as timestamp string (milliseconds)
+    settledAt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      throw new Error("User not found");
-    }
+    await assertFriendOwnedByUser(ctx, args.friendId, user._id, "friendId");
 
     const amount = parseFloat(args.amount);
     if (isNaN(amount) || amount <= 0) {
       throw new Error("Invalid amount");
     }
 
-    // Get self friend
-    const selfFriend = await ctx.db
-      .query("friends")
-      .withIndex("by_owner_isSelf", (q) =>
-        q.eq("ownerId", user._id).eq("isSelf", true)
-      )
-      .unique();
-
-    if (!selfFriend) {
-      throw new Error("Self friend not found");
-    }
-
-    // Parse exchange rates if provided by client
     let exchangeRates = undefined;
     if (args.exchangeRatesJson) {
       exchangeRates = JSON.parse(args.exchangeRatesJson);
     }
 
-    // Calculate net balance before settlement for "X out of Y" display
-    // Get all splits for this friend (what friend owes from transactions where user paid)
-    const friendSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
+    const friend = await ctx.db.get(args.friendId);
+    const friendUserId = friend ? resolveToUserId(friend) : undefined;
 
-    let friendOwesUser = 0;
-    let firstTxWithRates: any = null;
+    const balance = await computeBalanceWithFriend(
+      ctx, user._id, friendUserId, args.currency, args.friendId, exchangeRates
+    );
 
-    for (const split of friendSplits) {
-      const transaction = await ctx.db.get(split.transactionId);
-      if (!transaction) continue;
-
-      const payer = await ctx.db.get(transaction.paidById);
-      if (!payer || !payer.isSelf) continue;
-
-      // Save first transaction with exchange rates for later use
-      if (!firstTxWithRates && transaction.exchangeRates) {
-        firstTxWithRates = transaction;
-      }
-
-      // Convert to user's currency
-      const rates = transaction.exchangeRates?.rates || exchangeRates?.rates;
-      if (transaction.currency !== args.currency && rates) {
-        friendOwesUser += convertAmountHelper(split.amount, transaction.currency, args.currency, rates);
-      } else {
-        friendOwesUser += split.amount;
-      }
-    }
-
-    // Get splits where user owes (user's splits where friend paid)
-    const userSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", selfFriend._id))
-      .collect();
-
-    let userOwesFriend = 0;
-
-    for (const split of userSplits) {
-      const transaction = await ctx.db.get(split.transactionId);
-      if (!transaction) continue;
-      if (transaction.paidById !== args.friendId) continue;
-
-      // Save first transaction with exchange rates for later use
-      if (!firstTxWithRates && transaction.exchangeRates) {
-        firstTxWithRates = transaction;
-      }
-
-      // Convert to user's currency
-      const rates = transaction.exchangeRates?.rates || exchangeRates?.rates;
-      if (transaction.currency !== args.currency && rates) {
-        userOwesFriend += convertAmountHelper(split.amount, transaction.currency, args.currency, rates);
-      } else {
-        userOwesFriend += split.amount;
-      }
-    }
-
-    // Get existing settlements to calculate net balance
-    const existingSettlements = await ctx.db
-      .query("settlements")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
-
-    let settlementsFromFriend = 0;
-    let settlementsToFriend = 0;
-
-    for (const s of existingSettlements) {
-      if (s.createdById !== user._id) continue;
-
-      let convertedAmount = s.amount;
-      if (s.currency !== args.currency && s.exchangeRates?.rates) {
-        convertedAmount = convertAmountHelper(s.amount, s.currency, args.currency, s.exchangeRates.rates);
-      }
-
-      if (s.direction === "from_friend") {
-        settlementsFromFriend += convertedAmount;
-      } else if (s.direction === "to_friend") {
-        settlementsToFriend += convertedAmount;
-      }
-    }
-
-    // Net balance before this settlement
-    const netBalance = friendOwesUser - settlementsFromFriend - userOwesFriend + settlementsToFriend;
+    const netBalance =
+      balance.friendOwesUser - balance.settlementsFromFriend
+      - balance.userOwesFriend + balance.settlementsToFriend;
     const balanceBeforeSettlement = Math.abs(netBalance);
 
-    // Use transaction's exchange rates if client didn't provide them
-    const settlementExchangeRates = exchangeRates || firstTxWithRates?.exchangeRates;
-
-    // Use custom settledAt if provided, otherwise use current time
+    const settlementExchangeRates = exchangeRates || balance.firstTxWithRates?.exchangeRates;
     const settlementTime = args.settledAt ? parseFloat(args.settledAt) : Date.now();
 
-    // Create settlement record
     const settlementId = await ctx.db.insert("settlements", {
       createdById: user._id,
       friendId: args.friendId,
@@ -549,6 +645,37 @@ export const settleAmount = mutation({
       settledAt: settlementTime,
       createdAt: Date.now(),
     });
+
+    // Create reciprocal settlement for the other user so their balance updates too.
+    // Only sync if both sides have accepted status — removed/rejected/pending friends
+    // should not receive settlement mirrors.
+    if (friend && friend.linkedUserId) {
+      const reciprocalFriend = await ctx.db
+        .query("friends")
+        .withIndex("by_owner", (q) => q.eq("ownerId", friend.linkedUserId!))
+        .filter((q) => q.eq(q.field("linkedUserId"), user._id))
+        .unique();
+
+      if (
+        reciprocalFriend &&
+        friend.inviteStatus === "accepted" &&
+        reciprocalFriend.inviteStatus === "accepted"
+      ) {
+        const flippedDirection = args.direction === "to_friend" ? "from_friend" : "to_friend";
+        await ctx.db.insert("settlements", {
+          createdById: friend.linkedUserId!,
+          friendId: reciprocalFriend._id,
+          amount,
+          currency: args.currency,
+          direction: flippedDirection,
+          note: args.note,
+          balanceBeforeSettlement,
+          exchangeRates: settlementExchangeRates,
+          settledAt: settlementTime,
+          createdAt: Date.now(),
+        });
+      }
+    }
 
     return {
       settlementId,
@@ -567,14 +694,9 @@ export const getSettlementHistory = query({
     friendId: v.id("friends"),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      return [];
-    }
+    await assertFriendOwnedByUser(ctx, args.friendId, user._id, "friendId");
 
     const settlements = await ctx.db
       .query("settlements")
@@ -588,8 +710,247 @@ export const getSettlementHistory = query({
 });
 
 /**
+ * Resolve a friend entry to its underlying user ID.
+ * Self-friends map to their ownerId; linked friends map to linkedUserId.
+ * Dummy (unlinked) friends return undefined.
+ */
+function resolveToUserId(
+  friend: { isSelf: boolean; ownerId: Id<"users">; linkedUserId?: Id<"users"> }
+): Id<"users"> | undefined {
+  if (friend.isSelf) return friend.ownerId;
+  return friend.linkedUserId;
+}
+
+/**
+ * Collect all transactions where both the current user and a specific friend
+ * are involved, using transactionParticipants to discover shared transactions.
+ * Returns de-duplicated, enriched transactions sorted by date descending.
+ */
+async function collectTransactionsWithFriend(
+  ctx: any,
+  userId: Id<"users">,
+  friendUserId: Id<"users"> | undefined,
+  friendId?: Id<"friends">
+) {
+  // Own transactions
+  const ownTransactions = await ctx.db
+    .query("transactions")
+    .withIndex("by_creator", (q: any) => q.eq("createdById", userId))
+    .collect();
+
+  // Shared transactions via transactionParticipants
+  const participantRows = await ctx.db
+    .query("transactionParticipants")
+    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .collect();
+
+  const ownTxIds = new Set(ownTransactions.map((t: any) => t._id.toString()));
+  const sharedTransactions: any[] = [];
+  for (const p of participantRows) {
+    if (ownTxIds.has(p.transactionId.toString())) continue;
+    const tx = await ctx.db.get(p.transactionId);
+    if (tx) sharedTransactions.push(tx);
+  }
+
+  const allTransactions = [...ownTransactions, ...sharedTransactions];
+
+  // Filter to transactions involving the target friend
+  const result: any[] = [];
+  const seenTxIds = new Set<string>();
+
+  for (const tx of allTransactions) {
+    if (seenTxIds.has(tx._id.toString())) continue;
+
+    const splits = await ctx.db
+      .query("splits")
+      .withIndex("by_transaction", (q: any) => q.eq("transactionId", tx._id))
+      .collect();
+
+    let involvesUser = false;
+    let involvesFriend = false;
+
+    for (const split of splits) {
+      const target = await ctx.db.get(split.friendId);
+      if (!target) continue;
+      const targetUserId = resolveToUserId(target);
+      if (targetUserId?.toString() === userId.toString()) involvesUser = true;
+      if (friendUserId && targetUserId?.toString() === friendUserId.toString()) involvesFriend = true;
+      if (!friendUserId && friendId && split.friendId.toString() === friendId.toString()) involvesFriend = true;
+    }
+
+    const payer = await ctx.db.get(tx.paidById);
+    if (payer) {
+      const payerUserId = resolveToUserId(payer);
+      if (payerUserId?.toString() === userId.toString()) involvesUser = true;
+      if (friendUserId && payerUserId?.toString() === friendUserId.toString()) involvesFriend = true;
+      if (!friendUserId && friendId && tx.paidById.toString() === friendId.toString()) involvesFriend = true;
+    }
+
+    if (involvesUser && involvesFriend) {
+      const enrichedSplits = await Promise.all(
+        splits.map(async (split: any) => {
+          const friend = await ctx.db.get(split.friendId);
+          return { ...split, friend };
+        })
+      );
+
+      const creator = await ctx.db.get(tx.createdById);
+      const createdByName = creator?.name;
+
+      let lastEditedByName: string | undefined;
+      if (tx.lastEditedBy) {
+        const editor = await ctx.db.query("users").filter((q: any) => q.eq(q.field("_id"), tx.lastEditedBy)).unique();
+        if (editor) lastEditedByName = editor.name;
+      }
+
+      seenTxIds.add(tx._id.toString());
+      result.push({
+        ...tx,
+        payer,
+        splits: enrichedSplits,
+        createdByName,
+        lastEditedByName,
+      });
+    }
+  }
+
+  result.sort((a: any, b: any) => b.date - a.date);
+  return result;
+}
+
+/**
+ * Compute the balance between the current user and a specific friend,
+ * including shared transactions via transactionParticipants.
+ * Returns friendOwesUser, userOwesFriend, settlements, and the first tx with rates.
+ */
+async function computeBalanceWithFriend(
+  ctx: any,
+  userId: Id<"users">,
+  friendUserId: Id<"users"> | undefined,
+  targetCurrency: string,
+  friendId: Id<"friends">,
+  fallbackRates?: any
+) {
+  // Get all transactions involving both users
+  const ownTransactions = await ctx.db
+    .query("transactions")
+    .withIndex("by_creator", (q: any) => q.eq("createdById", userId))
+    .collect();
+
+  const participantRows = await ctx.db
+    .query("transactionParticipants")
+    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .collect();
+
+  const ownTxIds = new Set(ownTransactions.map((t: any) => t._id.toString()));
+  const sharedTransactions: any[] = [];
+  for (const p of participantRows) {
+    if (ownTxIds.has(p.transactionId.toString())) continue;
+    const tx = await ctx.db.get(p.transactionId);
+    if (tx) sharedTransactions.push(tx);
+  }
+
+  const allTransactions = [...ownTransactions, ...sharedTransactions];
+
+  let friendOwesUser = 0;
+  let userOwesFriend = 0;
+  let firstTxWithRates: any = null;
+  const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
+
+  for (const tx of allTransactions) {
+    const txCurrency = tx.currency;
+    const rates = tx.exchangeRates?.rates || fallbackRates?.rates;
+
+    const payer = await ctx.db.get(tx.paidById);
+    if (!payer) continue;
+
+    const payerUserId = resolveToUserId(payer);
+    const currentUserPaid = payerUserId?.toString() === userId.toString();
+
+    if (!firstTxWithRates && tx.exchangeRates) {
+      firstTxWithRates = tx;
+    }
+
+    const splits = await ctx.db
+      .query("splits")
+      .withIndex("by_transaction", (q: any) => q.eq("transactionId", tx._id))
+      .collect();
+
+    for (const split of splits) {
+      const target = await ctx.db.get(split.friendId);
+      if (!target) continue;
+
+      const targetUserId = resolveToUserId(target);
+      const splitIsCurrentUser = targetUserId?.toString() === userId.toString();
+      const splitIsFriend = (friendUserId && targetUserId?.toString() === friendUserId.toString())
+        || (!friendUserId && split.friendId.toString() === friendId.toString());
+      const payerIsFriend = (friendUserId && payerUserId?.toString() === friendUserId.toString())
+        || (!friendUserId && tx.paidById.toString() === friendId.toString());
+
+      if (currentUserPaid && splitIsFriend) {
+        if (!balancesByCurrency[txCurrency]) {
+          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+        }
+        balancesByCurrency[txCurrency].friendOwes += split.amount;
+
+        if (rates && txCurrency !== targetCurrency) {
+          friendOwesUser += convertAmountHelper(split.amount, txCurrency, targetCurrency, rates);
+        } else {
+          friendOwesUser += split.amount;
+        }
+      } else if (!currentUserPaid && splitIsCurrentUser && payerIsFriend) {
+        if (!balancesByCurrency[txCurrency]) {
+          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
+        }
+        balancesByCurrency[txCurrency].userOwes += split.amount;
+
+        if (rates && txCurrency !== targetCurrency) {
+          userOwesFriend += convertAmountHelper(split.amount, txCurrency, targetCurrency, rates);
+        } else {
+          userOwesFriend += split.amount;
+        }
+      }
+    }
+  }
+
+  // Process settlements (own-side only)
+  const settlements = await ctx.db
+    .query("settlements")
+    .withIndex("by_friend", (q: any) => q.eq("friendId", friendId))
+    .collect();
+
+  let settlementsFromFriend = 0;
+  let settlementsToFriend = 0;
+
+  for (const s of settlements) {
+    if (s.createdById.toString() !== userId.toString()) continue;
+
+    let convertedAmount = s.amount;
+    if (s.currency !== targetCurrency && s.exchangeRates?.rates) {
+      convertedAmount = convertAmountHelper(s.amount, s.currency, targetCurrency, s.exchangeRates.rates);
+    }
+
+    if (s.direction === "from_friend") {
+      settlementsFromFriend += convertedAmount;
+    } else if (s.direction === "to_friend") {
+      settlementsToFriend += convertedAmount;
+    }
+  }
+
+  return {
+    friendOwesUser,
+    userOwesFriend,
+    settlementsFromFriend,
+    settlementsToFriend,
+    balancesByCurrency,
+    firstTxWithRates,
+  };
+}
+
+/**
  * Get activity (transactions + settlements) with a specific friend
- * Used for the PersonDetailSheet to show a combined chronological feed
+ * Used for the PersonDetailSheet to show a combined chronological feed.
+ * Includes shared transactions created by either user via transactionParticipants.
  */
 export const getActivityWithFriend = query({
   args: {
@@ -597,72 +958,48 @@ export const getActivityWithFriend = query({
     friendId: v.id("friends"),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      return { transactions: [], settlements: [], userCurrency: "USD" };
-    }
+    await assertFriendOwnedByUser(ctx, args.friendId, user._id, "friendId");
 
     const userCurrency = user.defaultCurrency;
 
-    // Get self friend
-    const selfFriend = await ctx.db
-      .query("friends")
-      .withIndex("by_owner_isSelf", (q) =>
-        q.eq("ownerId", user._id).eq("isSelf", true)
-      )
-      .unique();
+    // Resolve the friend to a user ID for cross-user transaction lookup
+    const friend = await ctx.db.get(args.friendId);
+    const friendUserId = friend ? resolveToUserId(friend) : undefined;
 
-    if (!selfFriend) {
-      return { transactions: [], settlements: [], userCurrency };
-    }
+    const rawTransactions = await collectTransactionsWithFriend(ctx, user._id, friendUserId, args.friendId);
 
-    // Get all splits for this friend
-    const friendSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
+    const transactions = rawTransactions.map((tx: any) => {
+      const payerUserId = tx.payer ? resolveToUserId(tx.payer) : undefined;
+      const viewerPaid = payerUserId?.toString() === user._id.toString();
+      const friendPaid = (friendUserId && payerUserId?.toString() === friendUserId.toString())
+        || (!friendUserId && tx.paidById.toString() === args.friendId.toString());
 
-    // Get unique transaction IDs
-    const transactionIds = [...new Set(friendSplits.map((s) => s.transactionId))];
+      let friendSplitAmount: number | null = null;
+      let viewerSplitAmount: number | null = null;
 
-    // Fetch transactions and filter to only include those created by this user
-    const transactions = [];
-    for (const txId of transactionIds) {
-      const tx = await ctx.db.get(txId);
-      if (tx && tx.createdById === user._id) {
-        const payer = await ctx.db.get(tx.paidById);
-        const splits = await ctx.db
-          .query("splits")
-          .withIndex("by_transaction", (q) => q.eq("transactionId", txId))
-          .collect();
-
-        const enrichedSplits = await Promise.all(
-          splits.map(async (split) => {
-            const friend = await ctx.db.get(split.friendId);
-            return { ...split, friend };
-          })
-        );
-
-        // Calculate if this transaction involves both user and friend
-        const involvesUser = splits.some((s) => s.friendId === selfFriend._id);
-        const involvesFriend = splits.some((s) => s.friendId === args.friendId);
-
-        if (involvesUser && involvesFriend) {
-          transactions.push({
-            ...tx,
-            payer,
-            splits: enrichedSplits,
-          });
+      for (const split of tx.splits) {
+        const target = split.friend;
+        if (!target) continue;
+        const targetUserId = resolveToUserId(target);
+        if (targetUserId?.toString() === user._id.toString()) {
+          viewerSplitAmount = split.amount;
+        }
+        if ((friendUserId && targetUserId?.toString() === friendUserId.toString())
+          || (!friendUserId && split.friendId.toString() === args.friendId.toString())) {
+          friendSplitAmount = split.amount;
         }
       }
-    }
 
-    // Sort by date descending
-    transactions.sort((a, b) => b.date - a.date);
+      return {
+        ...tx,
+        viewerPaid: viewerPaid ?? false,
+        friendPaid: friendPaid ?? false,
+        friendSplitAmount,
+        viewerSplitAmount,
+      };
+    });
 
     // Get settlements with this friend (created by this user)
     const settlements = await ctx.db
@@ -670,11 +1007,9 @@ export const getActivityWithFriend = query({
       .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
       .collect();
 
-    // Filter to only settlements created by this user and convert amounts to user currency
     const filteredSettlements = settlements
-      .filter((s) => s.createdById === user._id)
+      .filter((s) => s.createdById.toString() === user._id.toString())
       .map((s) => {
-        // Convert settlement amount to user's currency if needed
         let convertedAmount = s.amount;
         let convertedBalanceBefore = s.balanceBeforeSettlement ?? null;
         
@@ -685,7 +1020,6 @@ export const getActivityWithFriend = query({
             userCurrency,
             s.exchangeRates.rates
           );
-          // Also convert balanceBeforeSettlement if present
           if (s.balanceBeforeSettlement !== undefined) {
             convertedBalanceBefore = convertAmountHelper(
               s.balanceBeforeSettlement,
@@ -737,9 +1071,8 @@ function convertAmountHelper(
 }
 
 /**
- * Get balance summary with a specific friend
- * Balance = (friend's splits where user paid) - (settlements FROM friend) 
- *         - (user's splits where friend paid) + (settlements TO friend)
+ * Get balance summary with a specific friend.
+ * Uses transactionParticipants for cross-user transaction discovery.
  */
 export const getBalanceWithFriend = query({
   args: {
@@ -747,140 +1080,28 @@ export const getBalanceWithFriend = query({
     friendId: v.id("friends"),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
-    if (!user) {
-      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0, userCurrency: "USD", balancesByCurrency: {} };
-    }
+    await assertFriendOwnedByUser(ctx, args.friendId, user._id, "friendId");
 
     const userCurrency = user.defaultCurrency;
 
-    // Get self friend
-    const selfFriend = await ctx.db
-      .query("friends")
-      .withIndex("by_owner_isSelf", (q) =>
-        q.eq("ownerId", user._id).eq("isSelf", true)
-      )
-      .unique();
+    const friend = await ctx.db.get(args.friendId);
+    const friendUserId = friend ? resolveToUserId(friend) : undefined;
 
-    if (!selfFriend) {
-      return { friendOwesUser: 0, userOwesFriend: 0, netBalance: 0, userCurrency, balancesByCurrency: {} };
-    }
+    const balance = await computeBalanceWithFriend(
+      ctx, user._id, friendUserId, userCurrency, args.friendId
+    );
 
-    // Track balances by original currency
-    const balancesByCurrency: Record<string, { friendOwes: number; userOwes: number }> = {};
-
-    // Get all splits for this friend (what friend owes)
-    const friendSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
-
-    let friendOwesUserConverted = 0;
-    for (const split of friendSplits) {
-      const transaction = await ctx.db.get(split.transactionId);
-      if (!transaction) continue;
-
-      // Only count if user paid
-      const payer = await ctx.db.get(transaction.paidById);
-      if (payer && payer.isSelf) {
-        const txCurrency = transaction.currency;
-        
-        if (!balancesByCurrency[txCurrency]) {
-          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
-        }
-        balancesByCurrency[txCurrency].friendOwes += split.amount;
-        
-        // Convert to user's currency
-        if (transaction.exchangeRates) {
-          friendOwesUserConverted += convertAmountHelper(
-            split.amount,
-            txCurrency,
-            userCurrency,
-            transaction.exchangeRates.rates
-          );
-        } else {
-          friendOwesUserConverted += split.amount;
-        }
-      }
-    }
-
-    // Get user's splits where friend paid (what user owes)
-    const userSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_friend", (q) => q.eq("friendId", selfFriend._id))
-      .collect();
-
-    let userOwesFriendConverted = 0;
-    for (const split of userSplits) {
-      const transaction = await ctx.db.get(split.transactionId);
-      if (!transaction) continue;
-
-      // Only count if friend paid
-      if (transaction.paidById === args.friendId) {
-        const txCurrency = transaction.currency;
-        
-        if (!balancesByCurrency[txCurrency]) {
-          balancesByCurrency[txCurrency] = { friendOwes: 0, userOwes: 0 };
-        }
-        balancesByCurrency[txCurrency].userOwes += split.amount;
-        
-        // Convert to user's currency
-        if (transaction.exchangeRates) {
-          userOwesFriendConverted += convertAmountHelper(
-            split.amount,
-            txCurrency,
-            userCurrency,
-            transaction.exchangeRates.rates
-          );
-        } else {
-          userOwesFriendConverted += split.amount;
-        }
-      }
-    }
-
-    // Get all settlements with this friend
-    const settlements = await ctx.db
-      .query("settlements")
-      .withIndex("by_friend", (q) => q.eq("friendId", args.friendId))
-      .collect();
-
-    let settlementsFromFriendConverted = 0;
-    let settlementsToFriendConverted = 0;
-
-    for (const settlement of settlements) {
-      if (settlement.createdById !== user._id) continue;
-
-      let convertedAmount = settlement.amount;
-      if (settlement.currency !== userCurrency && settlement.exchangeRates?.rates) {
-        convertedAmount = convertAmountHelper(
-          settlement.amount,
-          settlement.currency,
-          userCurrency,
-          settlement.exchangeRates.rates
-        );
-      }
-
-      if (settlement.direction === "from_friend") {
-        settlementsFromFriendConverted += convertedAmount;
-      } else if (settlement.direction === "to_friend") {
-        settlementsToFriendConverted += convertedAmount;
-      }
-    }
-
-    // Calculate final amounts after settlements
-    const effectiveFriendOwes = friendOwesUserConverted - settlementsFromFriendConverted;
-    const effectiveUserOwes = userOwesFriendConverted - settlementsToFriendConverted;
+    const effectiveFriendOwes = balance.friendOwesUser - balance.settlementsFromFriend;
+    const effectiveUserOwes = balance.userOwesFriend - balance.settlementsToFriend;
 
     return {
       friendOwesUser: effectiveFriendOwes,
       userOwesFriend: effectiveUserOwes,
       netBalance: effectiveFriendOwes - effectiveUserOwes,
       userCurrency,
-      balancesByCurrency,
+      balancesByCurrency: balance.balancesByCurrency,
     };
   },
 });
@@ -906,24 +1127,37 @@ export const updateTransactionFromJson = mutation({
     exchangeRatesJson: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+    const user = await getAuthenticatedUser(ctx, args.clerkId);
 
     const existing = await ctx.db.get(args.transactionId);
     if (!existing) {
       throw new Error("Transaction not found");
     }
+
+    // Allow edit if user is creator or a participant
     if (existing.createdById !== user._id) {
-      throw new Error("Not authorized to edit this transaction");
+      const participant = await ctx.db
+        .query("transactionParticipants")
+        .withIndex("by_user_transaction", (q) =>
+          q.eq("userId", user._id).eq("transactionId", args.transactionId)
+        )
+        .unique();
+      if (!participant) {
+        throw new Error("Not authorized to edit this transaction");
+      }
     }
 
-    const paidById = args.paidById as Id<"friends">;
+    const existingSplits = await ctx.db
+      .query("splits")
+      .withIndex("by_transaction", (q) =>
+        q.eq("transactionId", args.transactionId)
+      )
+      .collect();
+
+    const creatorParticipantIds = new Set(
+      existingSplits.map((split) => split.friendId.toString())
+    );
+
     const totalAmount = parseFloat(args.totalAmount);
     const date = parseFloat(args.date);
 
@@ -964,15 +1198,117 @@ export const updateTransactionFromJson = mutation({
       exchangeRates = JSON.parse(args.exchangeRatesJson);
     }
 
-    const convertedItems = items?.map((item) => ({
+    // When a non-creator edits, remap friend IDs from the editor's space to the creator's space
+    const isEditorTheCreator = user._id === existing.createdById;
+    const remapFriendId = async (
+      editorFriendId: Id<"friends">,
+      fieldName: string
+    ): Promise<Id<"friends">> => {
+      if (isEditorTheCreator) {
+        await assertFriendOwnedByUser(
+          ctx,
+          editorFriendId,
+          existing.createdById,
+          fieldName
+        );
+        return editorFriendId;
+      }
+
+      if (creatorParticipantIds.has(editorFriendId.toString())) {
+        return editorFriendId;
+      }
+
+      const editorFriend = await ctx.db.get(editorFriendId);
+      if (!editorFriend) {
+        throw new Error(`${fieldName} friend not found`);
+      }
+
+      if (editorFriend.ownerId.toString() !== user._id.toString()) {
+        throw new Error(`${fieldName} must reference an existing split participant`);
+      }
+
+      const targetUserId = resolveToUserId(editorFriend);
+      if (!targetUserId) {
+        throw new Error(`${fieldName} must reference an existing split participant`);
+      }
+
+      // If the target user IS the creator, find the creator's self-friend
+      if (targetUserId.toString() === existing.createdById.toString()) {
+        const creatorSelf = await ctx.db
+          .query("friends")
+          .withIndex("by_owner_isSelf", (q) =>
+            q.eq("ownerId", existing.createdById).eq("isSelf", true)
+          )
+          .unique();
+        if (creatorSelf && creatorParticipantIds.has(creatorSelf._id.toString())) {
+          return creatorSelf._id;
+        }
+      }
+
+      // Otherwise find the creator's friend entry that links to this user
+      const creatorFriend = await ctx.db
+        .query("friends")
+        .withIndex("by_owner_linkedUser", (q) =>
+          q.eq("ownerId", existing.createdById).eq("linkedUserId", targetUserId)
+        )
+        .unique();
+      if (creatorFriend && creatorParticipantIds.has(creatorFriend._id.toString())) {
+        return creatorFriend._id;
+      }
+
+      throw new Error(`${fieldName} must reference an existing split participant`);
+    };
+
+    const paidById = await remapFriendId(
+      args.paidById as Id<"friends">,
+      "paidById"
+    );
+
+    const convertedItems = items ? await Promise.all(items.map(async (item) => ({
       id: item.id,
       name: item.name,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
-      assignedToIds: item.assignedToIds.map((id) => id as Id<"friends">),
-    }));
+      assignedToIds: await Promise.all(
+        item.assignedToIds.map((id) =>
+          remapFriendId(id as Id<"friends">, "item assignment")
+        )
+      ),
+    }))) : undefined;
 
-    // Update the transaction document
+    const remappedSplits = await Promise.all(
+      splits.map(async (split) => ({
+        ...split,
+        friendId: await remapFriendId(
+          split.friendId as Id<"friends">,
+          "split participant"
+        ),
+      }))
+    );
+
+    if (!isEditorTheCreator) {
+      const remappedParticipantIds = new Set(
+        remappedSplits.map((split) => split.friendId.toString())
+      );
+
+      if (
+        remappedParticipantIds.size !== creatorParticipantIds.size ||
+        Array.from(creatorParticipantIds).some(
+          (friendId) => !remappedParticipantIds.has(friendId)
+        )
+      ) {
+        throw new Error("Non-creators cannot add or remove split participants");
+      }
+
+      if (!creatorParticipantIds.has(paidById.toString())) {
+        throw new Error("Non-creators can only choose a payer from the existing split participants");
+      }
+    }
+
+    // Update the transaction document with edit tracking
+    const editEntry = { editedBy: user._id, editedAt: Date.now() };
+    const previousHistory = existing.editHistory ?? [];
+
     await ctx.db.patch(args.transactionId, {
       paidById,
       title: args.title,
@@ -986,31 +1322,30 @@ export const updateTransactionFromJson = mutation({
       items: convertedItems,
       exchangeRates,
       date,
+      lastEditedBy: user._id,
+      lastEditedAt: editEntry.editedAt,
+      editHistory: [...previousHistory, editEntry],
     });
-
-    // Delete all existing splits for this transaction
-    const existingSplits = await ctx.db
-      .query("splits")
-      .withIndex("by_transaction", (q) =>
-        q.eq("transactionId", args.transactionId)
-      )
-      .collect();
 
     for (const split of existingSplits) {
       await ctx.db.delete(split._id);
     }
 
-    // Create new splits
-    for (const split of splits) {
-      const friendId = split.friendId as Id<"friends">;
+    // Create new splits (remapped to creator's friend space)
+    const splitFriendIds: Id<"friends">[] = [];
+    for (const split of remappedSplits) {
+      splitFriendIds.push(split.friendId);
       await ctx.db.insert("splits", {
         transactionId: args.transactionId,
-        friendId,
+        friendId: split.friendId,
         amount: split.amount,
         percentage: split.percentage ?? undefined,
         createdAt: Date.now(),
       });
     }
+
+    // Re-sync transactionParticipants
+    await syncTransactionParticipants(ctx, args.transactionId, existing.createdById, splitFriendIds);
 
     return args.transactionId;
   },
@@ -1024,6 +1359,13 @@ export const deleteTransaction = mutation({
     transactionId: v.id("transactions"),
   },
   handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    const transaction = await ctx.db.get(args.transactionId);
+    if (!transaction) {
+      throw new Error("Transaction not found");
+    }
+    requireOwner(transaction.createdById, user._id, "Only the split creator can delete this transaction");
+
     // Delete all splits
     const splits = await ctx.db
       .query("splits")
@@ -1032,6 +1374,16 @@ export const deleteTransaction = mutation({
 
     for (const split of splits) {
       await ctx.db.delete(split._id);
+    }
+
+    // Delete transactionParticipants
+    const participants = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_transaction", (q) => q.eq("transactionId", args.transactionId))
+      .collect();
+
+    for (const p of participants) {
+      await ctx.db.delete(p._id);
     }
 
     // Delete transaction

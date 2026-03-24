@@ -40,6 +40,10 @@ struct SplitDetailView: View {
         displayTransaction.currency != userCurrency
     }
     
+    private var canDeleteTransaction: Bool {
+        displayTransaction.createdById == convexService.currentUserId
+    }
+    
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
         return progress
@@ -60,6 +64,8 @@ struct SplitDetailView: View {
                 if let items = displayTransaction.items, !items.isEmpty {
                     itemizedListSection(items: items)
                 }
+                
+                editTrackingSection
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
@@ -90,16 +96,18 @@ struct SplitDetailView: View {
                 .opacity(transitionProgress >= 0.5 ? 1 : 0)
                 .animation(.smooth(duration: 0.25), value: transitionProgress >= 0.5)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showDeleteAlert = true
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.destructive)
-                        .font(.subheadline)
+            if canDeleteTransaction {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showDeleteAlert = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.destructive)
+                            .font(.subheadline)
+                    }
                 }
+                ToolbarSpacer(placement: .topBarTrailing)
             }
-            ToolbarSpacer(placement: .topBarTrailing)
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showEditSheet = true
@@ -430,6 +438,59 @@ struct SplitDetailView: View {
                 topTrailingRadius: topRadius
             )
         )
+    }
+    
+    // MARK: - Edit Tracking
+    
+    @ViewBuilder
+    private var editTrackingSection: some View {
+        let editHistory = displayTransaction.enrichedEditHistory ?? []
+        let hasCreator = displayTransaction.createdByName != nil
+        let hasEdits = !editHistory.isEmpty
+        let hasLegacyEdit = editHistory.isEmpty && displayTransaction.lastEditedByName != nil && displayTransaction.lastEditedAt != nil
+        
+        if hasCreator || hasEdits || hasLegacyEdit {
+            VStack(spacing: 8) {
+                // Show full edit history (newest first)
+                ForEach(editHistory.reversed(), id: \.editedAt) { entry in
+                    let editDate = Date(timeIntervalSince1970: entry.editedAt / 1000)
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil.line")
+                            .font(.caption2)
+                        Text("Edited by \(entry.editedByName) on \(editDate.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                
+                // Fallback for old transactions that only have lastEditedBy/lastEditedAt
+                if hasLegacyEdit,
+                   let editedByName = displayTransaction.lastEditedByName,
+                   let editedAt = displayTransaction.lastEditedAt {
+                    let editDate = Date(timeIntervalSince1970: editedAt / 1000)
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil.line")
+                            .font(.caption2)
+                        Text("Edited by \(editedByName) on \(editDate.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                
+                if let creatorName = displayTransaction.createdByName {
+                    let createdDate = Date(timeIntervalSince1970: displayTransaction.createdAt / 1000)
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle")
+                            .font(.caption2)
+                        Text("Created by \(creatorName) on \(createdDate.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 4)
+        }
     }
     
     // MARK: - Avatar Helpers

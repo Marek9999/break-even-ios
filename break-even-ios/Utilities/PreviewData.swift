@@ -21,6 +21,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: true,
+        inviteStatus: "none",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 
@@ -34,6 +35,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: false,
+        inviteStatus: "accepted",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 
@@ -47,6 +49,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: false,
+        inviteStatus: "accepted",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 
@@ -60,6 +63,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: false,
+        inviteStatus: "accepted",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 
@@ -73,6 +77,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: false,
+        inviteStatus: "accepted",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 
@@ -86,6 +91,7 @@ extension ConvexFriend {
         avatarUrl: nil,
         isDummy: false,
         isSelf: false,
+        inviteStatus: "accepted",
         createdAt: Date().timeIntervalSince1970 * 1000
     )
 }
@@ -133,13 +139,16 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(1),
         createdAt: daysAgo(1),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s1", transactionId: "tx-1", friend: .previewSelf, amount: 52.27),
             .preview(id: "s2", transactionId: "tx-1", friend: .previewAlice, amount: 52.27),
             .preview(id: "s3", transactionId: "tx-1", friend: .previewBob, amount: 52.26),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewGroceries = EnrichedTransaction(
@@ -157,12 +166,15 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(3),
         createdAt: daysAgo(3),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewAlice,
         splits: [
             .preview(id: "s4", transactionId: "tx-2", friend: .previewSelf, amount: 44.73),
             .preview(id: "s5", transactionId: "tx-2", friend: .previewAlice, amount: 44.72),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewCoffee = EnrichedTransaction(
@@ -180,12 +192,15 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(5),
         createdAt: daysAgo(5),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s6", transactionId: "tx-3", friend: .previewSelf, amount: 12.25),
             .preview(id: "s7", transactionId: "tx-3", friend: .previewCarla, amount: 12.25),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewRoadTrip = EnrichedTransaction(
@@ -203,13 +218,16 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(7),
         createdAt: daysAgo(7),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewBob,
         splits: [
             .preview(id: "s8", transactionId: "tx-4", friend: .previewSelf, amount: 24.00),
             .preview(id: "s9", transactionId: "tx-4", friend: .previewBob, amount: 24.00),
             .preview(id: "s10", transactionId: "tx-4", friend: .previewAlice, amount: 24.00),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewConcert = EnrichedTransaction(
@@ -227,12 +245,15 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(14),
         createdAt: daysAgo(14),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s11", transactionId: "tx-5", friend: .previewSelf, amount: 160.00),
             .preview(id: "s12", transactionId: "tx-5", friend: .previewCarla, amount: 160.00),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewEuroTrip = EnrichedTransaction(
@@ -254,12 +275,15 @@ extension EnrichedTransaction {
         ),
         date: daysAgo(10),
         createdAt: daysAgo(10),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s13", transactionId: "tx-6", friend: .previewSelf, amount: 34.00),
             .preview(id: "s14", transactionId: "tx-6", friend: .previewAlice, amount: 34.00),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     /// 5 participants, receipt photo, and itemized list
@@ -283,6 +307,8 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(2),
         createdAt: daysAgo(2),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s15", transactionId: "tx-7", friend: .previewSelf, amount: 24.71),
@@ -291,7 +317,8 @@ extension EnrichedTransaction {
             .preview(id: "s18", transactionId: "tx-7", friend: .previewCarla, amount: 16.19),
             .preview(id: "s19", transactionId: "tx-7", friend: .previewDave, amount: 6.00),
         ],
-        receiptUrl: "https://picsum.photos/400/600"
+        receiptUrl: "https://picsum.photos/400/600",
+        lastEditedByName: nil
     )
 
     /// Receipt photo only, no itemized list
@@ -310,13 +337,16 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(4),
         createdAt: daysAgo(4),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewAlice,
         splits: [
             .preview(id: "s20", transactionId: "tx-8", friend: .previewSelf, amount: 28.47),
             .preview(id: "s21", transactionId: "tx-8", friend: .previewAlice, amount: 28.47),
             .preview(id: "s22", transactionId: "tx-8", friend: .previewBob, amount: 28.46),
         ],
-        receiptUrl: "https://picsum.photos/400/600"
+        receiptUrl: "https://picsum.photos/400/600",
+        lastEditedByName: nil
     )
 
     /// Itemized list only, no receipt photo
@@ -340,13 +370,16 @@ extension EnrichedTransaction {
         exchangeRates: nil,
         date: daysAgo(6),
         createdAt: daysAgo(6),
+        lastEditedBy: nil,
+        lastEditedAt: nil,
         payer: .previewSelf,
         splits: [
             .preview(id: "s23", transactionId: "tx-9", friend: .previewSelf, amount: 71.37),
             .preview(id: "s24", transactionId: "tx-9", friend: .previewAlice, amount: 12.49),
             .preview(id: "s25", transactionId: "tx-9", friend: .previewBob, amount: 58.89),
         ],
-        receiptUrl: nil
+        receiptUrl: nil,
+        lastEditedByName: nil
     )
 
     static let previewList: [EnrichedTransaction] = [

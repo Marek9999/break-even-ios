@@ -10,10 +10,13 @@ export default defineSchema({
     phone: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
     defaultCurrency: v.string(), // "USD", "EUR", etc.
+    username: v.optional(v.string()),
+    usernameChangedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_clerkId", ["clerkId"])
-    .index("by_email", ["email"]),
+    .index("by_email", ["email"])
+    .index("by_username", ["username"]),
 
   // Friends - can be dummy or linked to real users
   friends: defineTable({
@@ -23,14 +26,19 @@ export default defineSchema({
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
+    avatarEmoji: v.optional(v.string()),
+    avatarColor: v.optional(v.string()),
     isDummy: v.boolean(), // True if not linked to real user
     isSelf: v.boolean(), // True if this represents the owner themselves
+    inviteStatus: v.string(), // "none" | "invite_sent" | "invite_received" | "accepted" | "rejected" | "removed_by_me" | "removed_by_them"
     createdAt: v.number(),
   })
     .index("by_owner", ["ownerId"])
     .index("by_linkedUser", ["linkedUserId"])
+    .index("by_owner_linkedUser", ["ownerId", "linkedUserId"])
     .index("by_owner_email", ["ownerId", "email"])
-    .index("by_owner_isSelf", ["ownerId", "isSelf"]),
+    .index("by_owner_isSelf", ["ownerId", "isSelf"])
+    .index("by_owner_inviteStatus", ["ownerId", "inviteStatus"]),
 
   // Cached exchange rates (refreshed only when creating splits if stale)
   exchangeRates: defineTable({
@@ -87,6 +95,16 @@ export default defineSchema({
     ),
     date: v.number(),
     createdAt: v.number(),
+    lastEditedBy: v.optional(v.id("users")),
+    lastEditedAt: v.optional(v.number()),
+    editHistory: v.optional(
+      v.array(
+        v.object({
+          editedBy: v.id("users"),
+          editedAt: v.number(),
+        })
+      )
+    ),
   })
     .index("by_creator", ["createdById"])
     .index("by_createdAt", ["createdAt"])
@@ -141,14 +159,28 @@ export default defineSchema({
     friendId: v.id("friends"), // The dummy friend this invitation is for
     recipientEmail: v.optional(v.string()),
     recipientPhone: v.optional(v.string()),
-    status: v.string(), // "pending", "accepted", "expired", "cancelled"
+    status: v.string(), // "pending", "accepted", "rejected", "expired", "cancelled"
     token: v.string(), // Unique invite token for deep link
     expiresAt: v.number(),
     createdAt: v.number(),
   })
     .index("by_sender", ["senderId"])
+    .index("by_sender_status", ["senderId", "status"])
     .index("by_token", ["token"])
     .index("by_recipient_email", ["recipientEmail"])
+    .index("by_recipient_email_status", ["recipientEmail", "status"])
     .index("by_recipient_phone", ["recipientPhone"])
-    .index("by_friend", ["friendId"]),
+    .index("by_friend", ["friendId"])
+    .index("by_friend_status", ["friendId", "status"]),
+
+  // Junction table: which users can see/edit which transactions
+  transactionParticipants: defineTable({
+    transactionId: v.id("transactions"),
+    userId: v.id("users"),
+    role: v.string(), // "creator" | "participant"
+    addedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_transaction", ["transactionId"])
+    .index("by_user_transaction", ["userId", "transactionId"]),
 });

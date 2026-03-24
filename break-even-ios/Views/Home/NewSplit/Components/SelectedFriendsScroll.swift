@@ -11,6 +11,7 @@ import SwiftUI
 struct SelectedFriendsScroll: View {
     let friends: [ConvexFriend]
     let selfFriend: ConvexFriend?
+    let canRemoveFriends: Bool
     let onRemove: (ConvexFriend) -> Void
     
     var body: some View {
@@ -20,6 +21,7 @@ struct SelectedFriendsScroll: View {
                     FriendChipView(
                         friend: friend,
                         isSelf: friend.id == selfFriend?.id,
+                        canRemove: canRemoveFriends,
                         onRemove: { onRemove(friend) }
                     )
                 }
@@ -46,6 +48,7 @@ struct SelectedFriendsScroll: View {
 struct FriendChipView: View {
     let friend: ConvexFriend
     let isSelf: Bool
+    let canRemove: Bool
     let onRemove: () -> Void
     
     var body: some View {
@@ -60,7 +63,7 @@ struct FriendChipView: View {
                 .lineLimit(1)
             
             // Remove button (not for self)
-            if !isSelf {
+            if canRemove && !isSelf {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
@@ -87,6 +90,7 @@ struct FriendChipView: View {
                 SelectedFriendsScroll(
                     friends: friends,
                     selfFriend: nil,
+                    canRemoveFriends: true,
                     onRemove: { _ in }
                 )
                 .padding()

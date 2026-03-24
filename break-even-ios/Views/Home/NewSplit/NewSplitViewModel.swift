@@ -166,6 +166,7 @@ class NewSplitViewModel {
     
     // MARK: - Edit Mode
     var editingTransactionId: String?
+    var creatorUserId: String?
     var isEditing: Bool { editingTransactionId != nil }
     
     // MARK: - State
@@ -220,53 +221,120 @@ class NewSplitViewModel {
     /// Initialize in edit mode from an existing transaction
     init(from transaction: EnrichedTransaction, allFriends: [ConvexFriend]) {
         self.editingTransactionId = transaction._id
+        self.creatorUserId = transaction.createdById
         self.emoji = transaction.emoji
         self.title = transaction.title
         self.date = transaction.dateValue
         self.currency = transaction.currency
         self.totalAmount = transaction.totalAmount
-        self.paidBy = transaction.payer
         self.receiptFileId = transaction.receiptFileId
         self.exchangeRates = transaction.exchangeRates
         
         let method = NewSplitMethod.from(convexValue: transaction.splitMethod) ?? .equal
         self.splitMethod = method
         
+        let selfFriend = allFriends.first(where: { $0.isSelf })
+        
+        // Remap each split's friend to the current user's equivalent friend record.
+        // This prevents duplicates when the split was created by another user whose
+        // friend records have different IDs than the current user's.
+        var friendIdMapping: [String: String] = [:]
+        
         let participantFriends: [ConvexFriend] = transaction.splits.compactMap { split in
-            if let friend = split.friend { return friend }
-            return allFriends.first { $0._id == split.friendId }
+            let resolved = Self.resolveToLocalFriend(
+                splitFriend: split.friend,
+                splitFriendId: split.friendId,
+                allFriends: allFriends,
+                selfFriend: selfFriend
+            )
+            if let resolved, resolved._id != split.friendId {
+                friendIdMapping[split.friendId] = resolved._id
+            }
+            return resolved
         }
-        self.participants = participantFriends
+        
+        // Deduplicate (in case two foreign records resolved to the same local friend)
+        var seen = Set<String>()
+        self.participants = participantFriends.filter { seen.insert($0.id).inserted }
+        
+        // Remap the payer to the current user's friend record
+        if let payer = transaction.payer {
+            self.paidBy = Self.resolveToLocalFriend(
+                splitFriend: payer,
+                splitFriendId: payer._id,
+                allFriends: allFriends,
+                selfFriend: selfFriend
+            ) ?? payer
+        } else {
+            self.paidBy = transaction.payer
+        }
         
         switch method {
         case .equal:
             break
         case .unequal:
             for split in transaction.splits {
-                customAmounts[split.friendId] = split.amount
-                unequalEnteredIds.insert(split.friendId)
+                let mappedId = friendIdMapping[split.friendId] ?? split.friendId
+                customAmounts[mappedId] = split.amount
+                unequalEnteredIds.insert(mappedId)
             }
         case .byParts:
             for split in transaction.splits {
+                let mappedId = friendIdMapping[split.friendId] ?? split.friendId
                 if let pct = split.percentage, pct > 0 {
                     let parts = max(1, Int(round(pct / 10.0)))
-                    partsPerPerson[split.friendId] = parts
+                    partsPerPerson[mappedId] = parts
                 } else {
-                    partsPerPerson[split.friendId] = 1
+                    partsPerPerson[mappedId] = 1
                 }
             }
         case .byItem:
             if let txItems = transaction.items {
                 self.items = txItems.map { item in
-                    SplitItem(
+                    let remappedAssignees = Set(item.assignedToIds.map { friendIdMapping[$0] ?? $0 })
+                    return SplitItem(
                         name: item.name,
                         quantity: item.quantity,
                         amount: item.unitPrice,
-                        assignedTo: Set(item.assignedToIds)
+                        assignedTo: remappedAssignees
                     )
                 }
             }
         }
+    }
+    
+    /// Maps a foreign friend record to the current user's equivalent from allFriends.
+    private static func resolveToLocalFriend(
+        splitFriend: ConvexFriend?,
+        splitFriendId: String,
+        allFriends: [ConvexFriend],
+        selfFriend: ConvexFriend?
+    ) -> ConvexFriend? {
+        // Direct match in allFriends
+        if let match = allFriends.first(where: { $0._id == splitFriendId }) {
+            return match
+        }
+        
+        guard let splitFriend else { return nil }
+        
+        // Foreign friend pointing to the current user → use selfFriend
+        if let selfF = selfFriend, splitFriend.linkedUserId == selfF.ownerId {
+            return selfF
+        }
+        
+        // Foreign self-friend (represents the creator) → find them in our friends by linkedUserId
+        if splitFriend.isSelf,
+           let match = allFriends.first(where: { $0.linkedUserId == splitFriend.ownerId }) {
+            return match
+        }
+        
+        // Match by linkedUserId
+        if let linkedId = splitFriend.linkedUserId,
+           let match = allFriends.first(where: { $0.linkedUserId == linkedId }) {
+            return match
+        }
+        
+        return splitFriend
     }
     
     // MARK: - Split Calculations

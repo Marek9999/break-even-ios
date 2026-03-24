@@ -60,9 +60,10 @@ export const seedForCurrentUser = mutation({
         avatarUrl: currentUser.avatarUrl,
         isDummy: false,
         isSelf: true,
+        inviteStatus: "none",
         createdAt: now,
       });
-      selfFriend = await ctx.db.get(selfId);
+      selfFriend = (await ctx.db.get(selfId)) ?? undefined;
     }
 
     // ============================================
@@ -76,6 +77,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -86,6 +88,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Charlie",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -96,6 +99,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Diana",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -107,6 +111,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Eve",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -118,6 +123,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Frank",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -558,6 +564,7 @@ export const seedForCurrentUser = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Grace",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -783,6 +790,7 @@ export const seedDatabase = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alice",
       isDummy: false,
       isSelf: true,
+      inviteStatus: "none",
       createdAt: now,
     });
 
@@ -796,6 +804,7 @@ export const seedDatabase = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob",
       isDummy: false,
       isSelf: false,
+      inviteStatus: "accepted",
       createdAt: now,
     });
 
@@ -808,6 +817,7 @@ export const seedDatabase = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Charlie",
       isDummy: false,
       isSelf: false,
+      inviteStatus: "accepted",
       createdAt: now,
     });
 
@@ -818,6 +828,7 @@ export const seedDatabase = mutation({
       email: "diana@example.com",
       isDummy: true,
       isSelf: false,
+      inviteStatus: "invite_sent",
       createdAt: now,
     });
 
@@ -835,6 +846,7 @@ export const seedDatabase = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob",
       isDummy: false,
       isSelf: true,
+      inviteStatus: "none",
       createdAt: now,
     });
 
@@ -848,6 +860,7 @@ export const seedDatabase = mutation({
       avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alice",
       isDummy: false,
       isSelf: false,
+      inviteStatus: "accepted",
       createdAt: now,
     });
 

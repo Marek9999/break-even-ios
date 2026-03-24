@@ -104,11 +104,8 @@ struct HistoryView: View {
             // .safeAreaInset(edge: .bottom) {
             //     searchAccessory
             // }
-            .onAppear {
+            .task(id: clerk.user?.id) {
                 startSubscriptions()
-            }
-            .onDisappear {
-                viewModel.unsubscribe()
             }
             .onChange(of: searchText) { _, newValue in
                 viewModel.searchText = newValue

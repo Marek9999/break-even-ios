@@ -135,6 +135,6 @@ class HomeViewModel {
     
     /// Get non-self friends for selection
     var selectableFriends: [ConvexFriend] {
-        allFriends.filter { !$0.isSelf }
+        allFriends.filter(\.isSelectableForNewSplit)
     }
 }

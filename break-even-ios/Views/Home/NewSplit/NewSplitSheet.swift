@@ -59,7 +59,28 @@ struct NewSplitSheet: View {
     }
     
     private var selectableFriends: [ConvexFriend] {
-        allFriends.filter { !$0.isSelf }
+        allFriends.filter(\.isSelectableForNewSplit)
+    }
+    
+    private var canEditParticipants: Bool {
+        guard viewModel.isEditing, let creatorUserId = viewModel.creatorUserId else {
+            return true
+        }
+        return creatorUserId == convexService.currentUserId
+    }
+    
+    private var participantSelfFriend: ConvexFriend? {
+        viewModel.participants.first { friend in
+            friend.id == selfFriend?.id || friend.isSelf
+        }
+    }
+    
+    private var payerSelectionFriends: [ConvexFriend] {
+        if canEditParticipants {
+            return allFriends
+        }
+        let lockedSelfId = participantSelfFriend?.id
+        return viewModel.participants.filter { $0.id != lockedSelfId }
     }
     
     // MARK: - Body
@@ -93,6 +114,7 @@ struct NewSplitSheet: View {
             .safeAreaBar(edge: .bottom) {
                 NewSplitBottomBar(
                     isEditing: viewModel.isEditing,
+                    canDelete: canEditParticipants,
                     isValid: viewModel.isValid,
                     isLoading: viewModel.isLoading,
                     hasReceiptImage: viewModel.scannedReceiptImage != nil,
@@ -108,8 +130,8 @@ struct NewSplitSheet: View {
         contentWithNavigation
             .sheet(isPresented: $showPaidByPicker) {
                 PaidByPickerSheet(
-                    allFriends: allFriends,
-                    selfFriend: selfFriend,
+                    allFriends: payerSelectionFriends,
+                    selfFriend: canEditParticipants ? selfFriend : participantSelfFriend,
                     selectedFriend: $viewModel.paidBy,
                     onSelect: { friend in
                         if !viewModel.participants.contains(where: { $0.id == friend.id }) {
@@ -219,7 +241,7 @@ struct NewSplitSheet: View {
     
     @ViewBuilder
     private var searchOverlay: some View {
-        if isSearchActive {
+        if isSearchActive && canEditParticipants {
             FriendSearchOverlay(
                 availableFriends: selectableFriends,
                 selectedFriends: $viewModel.participants,
@@ -406,7 +428,8 @@ struct NewSplitSheet: View {
             if !viewModel.participants.isEmpty {
                 SelectedFriendsScroll(
                     friends: viewModel.participants,
-                    selfFriend: selfFriend,
+                    selfFriend: participantSelfFriend ?? selfFriend,
+                    canRemoveFriends: canEditParticipants,
                     onRemove: { friend in
                         viewModel.removeParticipant(friend)
                         if viewModel.paidBy?.id == friend.id {
@@ -417,10 +440,16 @@ struct NewSplitSheet: View {
                 .padding(.horizontal, -20)
             }
             
-            FriendSearchTrigger {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    isSearchActive = true
+            if canEditParticipants {
+                FriendSearchTrigger {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isSearchActive = true
+                    }
                 }
+            } else {
+                Text("Participants are fixed because this split was created by someone else.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -465,8 +494,15 @@ struct NewSplitSheet: View {
             viewModel.paidBy = self_
         }
         
-        if let self_ = selfFriend, !viewModel.participants.contains(where: { $0.id == self_.id }) {
-            viewModel.addParticipant(self_)
+        if let self_ = selfFriend {
+            let alreadyRepresented = viewModel.participants.contains { participant in
+                participant.id == self_.id ||
+                participant.isSelf ||
+                participant.linkedUserId == self_.ownerId
+            }
+            if !alreadyRepresented {
+                viewModel.addParticipant(self_)
+            }
         }
         
         if let receipt = receiptResult {
