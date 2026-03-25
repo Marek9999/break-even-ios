@@ -645,7 +645,7 @@ class NewSplitViewModel {
     
     // MARK: - Save Transaction
     
-    func save(clerkId: String) async throws {
+    func save(clerkId: String) async throws -> String {
         guard isValid else {
             throw NewSplitError.invalidData
         }
@@ -693,15 +693,17 @@ class NewSplitViewModel {
         if let txId = editingTransactionId {
             var updateArgs = args
             updateArgs["transactionId"] = txId
-            let _: String = try await client.mutation(
+            let updatedTransactionId: String = try await client.mutation(
                 "transactions:updateTransactionFromJson",
                 with: updateArgs
             )
+            return updatedTransactionId
         } else {
-            let _: String = try await client.mutation(
+            let createdTransactionId: String = try await client.mutation(
                 "transactions:createTransactionFromJson",
                 with: args
             )
+            return createdTransactionId
         }
     }
     

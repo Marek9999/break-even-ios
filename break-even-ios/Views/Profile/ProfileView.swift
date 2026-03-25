@@ -10,6 +10,10 @@ import PhotosUI
 import Clerk
 import ConvexMobile
 
+enum ProfileExternalNavigationRequest: Equatable {
+    case friends
+}
+
 private enum ProfileDestination: Hashable {
     case friends
     #if DEBUG
@@ -21,9 +25,11 @@ private enum ProfileDestination: Hashable {
 struct ProfileView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
+    @Environment(\.notificationManager) private var notificationManager
     @Environment(\.openURL) private var openURL
     
     @Binding var isDetailShowing: Bool
+    @Binding var externalNavigationRequest: ProfileExternalNavigationRequest?
     
     @State private var viewModel = ProfileViewModel()
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -67,8 +73,12 @@ struct ProfileView: View {
     
     // MARK: - Body
     
-    init(isDetailShowing: Binding<Bool> = .constant(false)) {
+    init(
+        isDetailShowing: Binding<Bool> = .constant(false),
+        externalNavigationRequest: Binding<ProfileExternalNavigationRequest?> = .constant(nil)
+    ) {
         _isDetailShowing = isDetailShowing
+        _externalNavigationRequest = externalNavigationRequest
     }
     
     var body: some View {
@@ -78,6 +88,7 @@ struct ProfileView: View {
                     headerSection
                     infoSection
                     cardsSection
+                    notificationsSection
                     feedbackSection
                     signOutSection
                     
@@ -162,6 +173,9 @@ struct ProfileView: View {
                 withAnimation(.spring(duration: 0.35)) {
                     isDetailShowing = newCount > 0
                 }
+            }
+            .onChange(of: externalNavigationRequest) { _, newValue in
+                handleExternalNavigation(newValue)
             }
             .task(id: clerk.user?.id) {
                 startSubscriptions()
@@ -490,6 +504,65 @@ struct ProfileView: View {
         )
     }
     
+    // MARK: - Notifications Section
+    
+    private var notificationsSection: some View {
+        VStack(spacing: 0) {
+            Text("Notifications")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 8)
+            
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: notificationToggleBinding) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Activity Notifications")
+                            .fontWeight(.medium)
+                            .foregroundStyle(.text)
+                        
+                        Text(notificationManager.notificationDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(notificationManager.isUpdatingPreference || clerk.user == nil)
+                
+                if notificationManager.shouldShowSettingsPrompt {
+                    Button("Open iPhone Settings") {
+                        notificationManager.openSystemSettings()
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                }
+                
+                if let lastErrorMessage = notificationManager.lastErrorMessage,
+                   !lastErrorMessage.isEmpty {
+                    Text(lastErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding()
+            .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+        }
+    }
+    
+    private var notificationToggleBinding: Binding<Bool> {
+        Binding(
+            get: { notificationManager.notificationsEnabled },
+            set: { newValue in
+                Task {
+                    await notificationManager.updatePreference(isEnabled: newValue)
+                }
+            }
+        )
+    }
+    
     // MARK: - Feedback Section
     
     private var feedbackSection: some View {
@@ -652,6 +725,18 @@ struct ProfileView: View {
         #endif
         }
     }
+
+    private func handleExternalNavigation(_ request: ProfileExternalNavigationRequest?) {
+        guard let request else { return }
+
+        switch request {
+        case .friends:
+            navigationPath = NavigationPath()
+            navigationPath.append(ProfileDestination.friends)
+        }
+
+        externalNavigationRequest = nil
+    }
     
     // MARK: - Subscriptions
     
@@ -776,6 +861,9 @@ struct ProfileView: View {
     private func performSignOut() {
         Task {
             do {
+                if let clerkId = clerk.user?.id {
+                    await notificationManager.prepareForSignOut(clerkId: clerkId)
+                }
                 try await clerk.signOut()
             } catch {
                 #if DEBUG

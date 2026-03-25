@@ -43,11 +43,15 @@ enum KeyboardPrewarmer {
 
 @main
 struct break_even_iosApp: App {
+    @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
+    
     /// Shared Clerk instance for authentication
     @State private var clerk = Clerk.shared
     
     /// Convex service for backend operations
     @State private var convexService = ConvexService.shared
+    
+    @State private var notificationManager = NotificationManager.shared
     
     var body: some Scene {
         WindowGroup {
@@ -55,6 +59,7 @@ struct break_even_iosApp: App {
                 .preferredColorScheme(.dark)
                 .environment(\.clerk, clerk)
                 .environment(\.convexService, convexService)
+                .environment(\.notificationManager, notificationManager)
                 .onAppear {
                     // Pre-warm keyboard to eliminate first TextField focus lag
                     // This must be called after the window exists
@@ -67,6 +72,9 @@ struct break_even_iosApp: App {
                     if clerk.session != nil {
                         do {
                             try await convexService.syncUser(clerk: clerk)
+                            if let clerkId = clerk.user?.id {
+                                await notificationManager.handleAuthenticatedSession(clerkId: clerkId)
+                            }
                         } catch {
                             #if DEBUG
                             print("❌ Failed to sync user on launch: \(error)")
@@ -79,12 +87,16 @@ struct break_even_iosApp: App {
                         if newSession != nil {
                             do {
                                 try await convexService.syncUser(clerk: clerk)
+                                if let clerkId = clerk.user?.id {
+                                    await notificationManager.handleAuthenticatedSession(clerkId: clerkId)
+                                }
                             } catch {
                                 #if DEBUG
                                 print("❌ Failed to sync user with Convex: \(error)")
                                 #endif
                             }
                         } else {
+                            notificationManager.handleSignedOutLocally()
                             await convexService.signOut()
                         }
                     }

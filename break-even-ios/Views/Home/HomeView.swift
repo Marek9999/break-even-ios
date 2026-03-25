@@ -25,6 +25,9 @@ struct HomeView: View {
     @State private var selectedTab: OwedTab = .owedToYou
     @State private var selectedFriend: FriendWithBalance?
     @State private var receiptScanResult: ReceiptScanResult?
+    @State private var pendingSavedTransactionId: String?
+    
+    let onOpenTransactionInHistory: ((String) -> Void)?
     
     private var currentTabData: [FriendWithBalance] {
         selectedTab == .owedToYou ? viewModel.owedToMe : viewModel.iOwe
@@ -32,6 +35,10 @@ struct HomeView: View {
     
     private var currentTabAmount: Double {
         selectedTab == .owedToYou ? viewModel.totalOwedToMe : viewModel.totalIOwe
+    }
+    
+    init(onOpenTransactionInHistory: ((String) -> Void)? = nil) {
+        self.onOpenTransactionInHistory = onOpenTransactionInHistory
     }
     
     var body: some View {
@@ -66,20 +73,26 @@ struct HomeView: View {
         }
         .background(.background)
         .navigationBarHidden(true)
-        .fullScreenCover(item: $splitSheetConfig) { config in
+        .fullScreenCover(item: $splitSheetConfig, onDismiss: handleSplitSheetDismissal) { config in
             NewSplitSheet(
                 preSelectedFriend: config.preSelectedFriend,
                 allFriends: viewModel.allFriends,
                 selfFriend: viewModel.selfFriend,
-                userDefaultCurrency: viewModel.userCurrency
+                userDefaultCurrency: viewModel.userCurrency,
+                onSaveSuccess: { transactionId in
+                    pendingSavedTransactionId = transactionId
+                }
             )
         }
-        .fullScreenCover(item: $receiptScanResult) { result in
+        .fullScreenCover(item: $receiptScanResult, onDismiss: handleSplitSheetDismissal) { result in
             NewSplitSheet(
                 receiptResult: result,
                 allFriends: viewModel.allFriends,
                 selfFriend: viewModel.selfFriend,
-                userDefaultCurrency: viewModel.userCurrency
+                userDefaultCurrency: viewModel.userCurrency,
+                onSaveSuccess: { transactionId in
+                    pendingSavedTransactionId = transactionId
+                }
             )
         }
         .fullScreenCover(isPresented: $showReceiptCamera) {
@@ -127,6 +140,12 @@ struct HomeView: View {
         viewModel.subscribeToBalances(clerkId: clerkId)
         viewModel.subscribeToFriends(clerkId: clerkId)
         viewModel.subscribeToUser(clerkId: clerkId)
+    }
+    
+    private func handleSplitSheetDismissal() {
+        guard let transactionId = pendingSavedTransactionId else { return }
+        pendingSavedTransactionId = nil
+        onOpenTransactionInHistory?(transactionId)
     }
     
     // MARK: - Bubble Cluster Section

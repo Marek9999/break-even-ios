@@ -18,6 +18,30 @@ export default defineSchema({
     .index("by_email", ["email"])
     .index("by_username", ["username"]),
 
+  notificationDevices: defineTable({
+    userId: v.id("users"),
+    clerkId: v.string(),
+    deviceId: v.string(),
+    apnsToken: v.optional(v.string()),
+    notificationsEnabled: v.boolean(),
+    authorizationStatus: v.union(
+      v.literal("notDetermined"),
+      v.literal("denied"),
+      v.literal("authorized"),
+      v.literal("provisional"),
+      v.literal("ephemeral")
+    ),
+    platform: v.string(),
+    sessionActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_deviceId", ["deviceId"])
+    .index("by_user_deviceId", ["userId", "deviceId"])
+    .index("by_token", ["apnsToken"])
+    .index("by_user_notificationsEnabled", ["userId", "notificationsEnabled"]),
+
   // Friends - can be dummy or linked to real users
   friends: defineTable({
     ownerId: v.id("users"), // Who owns this friend entry
@@ -172,6 +196,25 @@ export default defineSchema({
     .index("by_recipient_phone", ["recipientPhone"])
     .index("by_friend", ["friendId"])
     .index("by_friend_status", ["friendId", "status"]),
+
+  // Activity feed for notifications
+  activities: defineTable({
+    userId: v.id("users"),
+    actorId: v.id("users"),
+    actorName: v.string(),
+    type: v.string(), // "invitation_received" | "invitation_accepted" | "invitation_rejected" | "invitation_cancelled" | "friend_removed" | "split_created" | "split_edited" | "split_deleted" | "settlement_recorded"
+    message: v.string(),
+    transactionId: v.optional(v.id("transactions")),
+    friendId: v.optional(v.id("friends")),
+    settlementId: v.optional(v.id("settlements")),
+    invitationId: v.optional(v.id("invitations")),
+    metadata: v.optional(v.string()),
+    isRead: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_createdAt", ["userId", "createdAt"])
+    .index("by_user_isRead", ["userId", "isRead"]),
 
   // Junction table: which users can see/edit which transactions
   transactionParticipants: defineTable({

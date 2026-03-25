@@ -17,6 +17,9 @@ DerivedData/
 *.xcuserstate
 *.xcscmblueprint
 
+SourcePackages/
+DerivedDataLocal/
+
 # Swift Package Manager
 .build/
 Packages/

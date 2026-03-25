@@ -8,6 +8,10 @@
 import SwiftUI
 import Clerk
 
+enum HistoryExternalNavigationRequest: Equatable {
+    case transaction(String)
+}
+
 struct HistoryView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
@@ -22,21 +26,35 @@ struct HistoryView: View {
     @Binding var searchText: String
     @Binding var isScrolled: Bool
     @Binding var isDetailShowing: Bool
+    @Binding var externalNavigationRequest: HistoryExternalNavigationRequest?
     
     @State private var navigationPath = NavigationPath()
     
-    init(searchText: Binding<String>, isScrolled: Binding<Bool>, isDetailShowing: Binding<Bool>) {
+    init(
+        searchText: Binding<String>,
+        isScrolled: Binding<Bool>,
+        isDetailShowing: Binding<Bool>,
+        externalNavigationRequest: Binding<HistoryExternalNavigationRequest?> = .constant(nil)
+    ) {
         _viewModel = State(initialValue: HistoryViewModel())
         _searchText = searchText
         _isScrolled = isScrolled
         _isDetailShowing = isDetailShowing
+        _externalNavigationRequest = externalNavigationRequest
     }
     
-    fileprivate init(viewModel: HistoryViewModel, searchText: Binding<String>, isScrolled: Binding<Bool>, isDetailShowing: Binding<Bool>) {
+    fileprivate init(
+        viewModel: HistoryViewModel,
+        searchText: Binding<String>,
+        isScrolled: Binding<Bool>,
+        isDetailShowing: Binding<Bool>,
+        externalNavigationRequest: Binding<HistoryExternalNavigationRequest?> = .constant(nil)
+    ) {
         _viewModel = State(initialValue: viewModel)
         _searchText = searchText
         _isScrolled = isScrolled
         _isDetailShowing = isDetailShowing
+        _externalNavigationRequest = externalNavigationRequest
     }
     
     var body: some View {
@@ -79,7 +97,7 @@ struct HistoryView: View {
                             .fixedSize()
                     }
                     .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
                         ForEach(SortOrder.allCases, id: \.self) { order in
                             Button {
@@ -110,13 +128,11 @@ struct HistoryView: View {
             .onChange(of: searchText) { _, newValue in
                 viewModel.searchText = newValue
             }
+            .onChange(of: externalNavigationRequest) { _, newValue in
+                handleExternalNavigation(newValue)
+            }
             .navigationDestination(for: String.self) { transactionId in
-                if let transaction = viewModel.transactions.first(where: { $0._id == transactionId }) {
-                    TransactionDetailView(
-                        transaction: transaction,
-                        userCurrency: viewModel.userCurrency
-                    )
-                }
+                TransactionDetailLoader(transactionId: transactionId)
             }
         }
         .onChange(of: navigationPath.count) { _, newCount in
@@ -157,6 +173,18 @@ struct HistoryView: View {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToTransactions(clerkId: clerkId)
         viewModel.subscribeToUser(clerkId: clerkId)
+    }
+    
+    private func handleExternalNavigation(_ request: HistoryExternalNavigationRequest?) {
+        guard let request else { return }
+        
+        switch request {
+        case .transaction(let transactionId):
+            navigationPath = NavigationPath()
+            navigationPath.append(transactionId)
+        }
+        
+        externalNavigationRequest = nil
     }
     
     // MARK: - Old Search Accessory (commented out -- now managed by CustomTabBar via MainTabView)

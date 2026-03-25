@@ -6,6 +6,7 @@ import {
   requireAuthenticatedUser,
   requireOwner,
 } from "./lib/auth";
+import { insertActivity } from "./activities";
 
 function generateToken(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -172,6 +173,25 @@ export const createInvitation = mutation({
             user._id
           );
 
+          // Activity: mutual auto-accept — notify both sides
+          await insertActivity(ctx, {
+            userId: friend.linkedUserId!,
+            actorId: user._id,
+            actorName: user.name,
+            type: "invitation_accepted",
+            message: `You and ${user.name} are now friends`,
+            friendId: args.friendId,
+            invitationId,
+          });
+          await insertActivity(ctx, {
+            userId: user._id,
+            actorId: friend.linkedUserId!,
+            actorName: recipientUser.name,
+            type: "invitation_accepted",
+            message: `You and ${recipientUser.name} are now friends`,
+            friendId: reciprocalFriend._id,
+          });
+
           return { invitationId, token, isExisting: false, autoAccepted: true };
         }
 
@@ -216,6 +236,19 @@ export const createInvitation = mutation({
       expiresAt,
       createdAt: Date.now(),
     });
+
+    // Activity: notify recipient if they're on the app
+    if (friend.linkedUserId) {
+      await insertActivity(ctx, {
+        userId: friend.linkedUserId,
+        actorId: user._id,
+        actorName: user.name,
+        type: "invitation_received",
+        message: `${user.name} sent you a friend request`,
+        friendId: args.friendId,
+        invitationId,
+      });
+    }
 
     return { invitationId, token, isExisting: false, autoAccepted: false };
   },
@@ -444,6 +477,17 @@ export const acceptInvitation = mutation({
       );
     }
 
+    // Activity: notify the original sender that their invite was accepted
+    await insertActivity(ctx, {
+      userId: invitation.senderId,
+      actorId: user._id,
+      actorName: user.name,
+      type: "invitation_accepted",
+      message: `${user.name} accepted your friend request`,
+      friendId: invitation.friendId,
+      invitationId: invitation._id,
+    });
+
     return { success: true, friendId: invitation.friendId };
   },
 });
@@ -546,6 +590,18 @@ export const acceptInvitationByFriend = mutation({
       );
     }
 
+    // Activity: notify the sender that their invite was accepted
+    if (myFriendRow.linkedUserId) {
+      await insertActivity(ctx, {
+        userId: myFriendRow.linkedUserId,
+        actorId: user._id,
+        actorName: user.name,
+        type: "invitation_accepted",
+        message: `${user.name} accepted your friend request`,
+        friendId: senderFriendRow?._id,
+      });
+    }
+
     return { success: true };
   },
 });
@@ -599,6 +655,16 @@ export const rejectInvitation = mutation({
           await ctx.db.patch(invitation._id, { status: "rejected" });
         }
       }
+
+      // Activity: notify the sender that their invite was rejected
+      await insertActivity(ctx, {
+        userId: myFriendRow.linkedUserId,
+        actorId: user._id,
+        actorName: user.name,
+        type: "invitation_rejected",
+        message: `${user.name} declined your friend request`,
+        friendId: args.friendId,
+      });
     }
 
     return { success: true };
@@ -626,6 +692,20 @@ export const cancelInvitation = mutation({
     }
 
     await ctx.db.patch(args.invitationId, { status: "cancelled" });
+
+    // Activity: notify recipient if they're on the app
+    const friend = await ctx.db.get(invitation.friendId);
+    if (friend && friend.linkedUserId) {
+      await insertActivity(ctx, {
+        userId: friend.linkedUserId,
+        actorId: user._id,
+        actorName: user.name,
+        type: "invitation_cancelled",
+        message: `${user.name} withdrew their friend request`,
+        friendId: invitation.friendId,
+        invitationId: args.invitationId,
+      });
+    }
 
     return true;
   },

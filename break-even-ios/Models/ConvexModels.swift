@@ -62,6 +62,35 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Notification Device Settings
+
+enum NotificationAuthorizationStatus: String, Codable, Hashable {
+    case notDetermined
+    case denied
+    case authorized
+    case provisional
+    case ephemeral
+    
+    var canDeliverNotifications: Bool {
+        switch self {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .notDetermined, .denied:
+            return false
+        }
+    }
+}
+
+struct NotificationDeviceSettings: Codable, Hashable {
+    let deviceId: String
+    let apnsToken: String?
+    let notificationsEnabled: Bool
+    let authorizationStatus: NotificationAuthorizationStatus
+    let platform: String
+    let sessionActive: Bool
+    let updatedAt: Double
+}
+
 // MARK: - Friend
 
 /// Friend model from Convex
@@ -723,6 +752,77 @@ enum ActivityItem: Identifiable {
             return tx.date
         case .settlement(let s):
             return s.settledAt
+        }
+    }
+}
+
+// MARK: - Activity
+
+struct ConvexActivity: Codable, Identifiable {
+    let _id: String
+    let userId: String
+    let actorId: String
+    let actorName: String
+    let type: String
+    let message: String
+    let transactionId: String?
+    let friendId: String?
+    let settlementId: String?
+    let invitationId: String?
+    let metadata: String?
+    let isRead: Bool
+    let createdAt: Double
+    
+    var id: String { _id }
+    
+    var createdAtDate: Date {
+        Date(timeIntervalSince1970: createdAt / 1000)
+    }
+    
+    var activityType: ActivityType {
+        ActivityType(rawValue: type) ?? .splitCreated
+    }
+}
+
+enum ActivityType: String, Codable {
+    case invitationReceived = "invitation_received"
+    case invitationAccepted = "invitation_accepted"
+    case invitationRejected = "invitation_rejected"
+    case invitationCancelled = "invitation_cancelled"
+    case friendRemoved = "friend_removed"
+    case splitCreated = "split_created"
+    case splitEdited = "split_edited"
+    case splitDeleted = "split_deleted"
+    case settlementRecorded = "settlement_recorded"
+    
+    var iconName: String {
+        switch self {
+        case .invitationReceived: return "person.badge.plus"
+        case .invitationAccepted: return "checkmark.circle"
+        case .invitationRejected: return "xmark.circle"
+        case .invitationCancelled: return "person.badge.minus"
+        case .friendRemoved: return "person.slash"
+        case .splitCreated: return "plus.circle"
+        case .splitEdited: return "pencil"
+        case .splitDeleted: return "trash"
+        case .settlementRecorded: return "banknote"
+        }
+    }
+    
+    var isNavigable: Bool {
+        switch self {
+        case .splitDeleted, .settlementRecorded: return false
+        default: return true
+        }
+    }
+    
+    var isFriendRelated: Bool {
+        switch self {
+        case .invitationReceived, .invitationAccepted, .invitationRejected,
+             .invitationCancelled, .friendRemoved:
+            return true
+        default:
+            return false
         }
     }
 }

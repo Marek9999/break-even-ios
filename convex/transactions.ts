@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedUser, isSplitSelectableStatus, requireOwner } from "./lib/auth";
+import { insertActivity } from "./activities";
 
 // Exchange rates validator for the supported currencies
 const exchangeRatesValidator = v.optional(
@@ -217,6 +218,14 @@ export const createTransaction = mutation({
     // Create transactionParticipants
     await syncTransactionParticipants(ctx, transactionId, user._id, args.splits.map(s => s.friendId));
 
+    // Activity: notify all participants except the creator
+    await notifyTransactionParticipants(
+      ctx, transactionId, user._id, user.name,
+      "split_created",
+      `${user.name} created a new split "${args.title}"`,
+      JSON.stringify({ title: args.title, emoji: args.emoji, amount: args.totalAmount, currency: args.currency })
+    );
+
     return transactionId;
   },
 });
@@ -290,6 +299,45 @@ async function syncTransactionParticipants(
     if (!addedUserIds.has(p.userId)) {
       await ctx.db.delete(p._id);
     }
+  }
+}
+
+/**
+ * Notify all transaction participants (except the actor) about an event.
+ * Uses transactionParticipants table to find real userIds.
+ */
+async function notifyTransactionParticipants(
+  ctx: any,
+  transactionId: Id<"transactions">,
+  actorId: Id<"users">,
+  actorName: string,
+  type: string,
+  message: string,
+  metadata?: string,
+  participantUserIds?: Id<"users">[]
+) {
+  let userIds: Id<"users">[];
+  if (participantUserIds) {
+    userIds = participantUserIds;
+  } else {
+    const participants = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
+      .collect();
+    userIds = participants.map((p: any) => p.userId);
+  }
+
+  for (const userId of userIds) {
+    if (userId.toString() === actorId.toString()) continue;
+    await insertActivity(ctx, {
+      userId,
+      actorId,
+      actorName,
+      type,
+      message,
+      transactionId: type === "split_deleted" ? undefined : transactionId,
+      metadata,
+    });
   }
 }
 
@@ -413,6 +461,14 @@ export const createTransactionFromJson = mutation({
 
     // Create transactionParticipants
     await syncTransactionParticipants(ctx, transactionId, user._id, splitFriendIds);
+
+    // Activity: notify all participants except the creator
+    await notifyTransactionParticipants(
+      ctx, transactionId, user._id, user.name,
+      "split_created",
+      `${user.name} created a new split "${args.title}"`,
+      JSON.stringify({ title: args.title, emoji: args.emoji, amount: totalAmount, currency: args.currency })
+    );
 
     return transactionId;
   },
@@ -673,6 +729,19 @@ export const settleAmount = mutation({
           exchangeRates: settlementExchangeRates,
           settledAt: settlementTime,
           createdAt: Date.now(),
+        });
+
+        // Activity: notify the other user about the settlement
+        const directionLabel = args.direction === "to_friend" ? "paid" : "received from";
+        await insertActivity(ctx, {
+          userId: friend.linkedUserId!,
+          actorId: user._id,
+          actorName: user.name,
+          type: "settlement_recorded",
+          message: `${user.name} ${directionLabel} ${friend.name}: ${amount.toFixed(2)} ${args.currency}`,
+          settlementId,
+          friendId: reciprocalFriend._id,
+          metadata: JSON.stringify({ amount, currency: args.currency, direction: args.direction }),
         });
       }
     }
@@ -1344,8 +1413,34 @@ export const updateTransactionFromJson = mutation({
       });
     }
 
+    // Capture old participants before re-sync (for activity notifications)
+    const oldParticipants = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_transaction", (q: any) => q.eq("transactionId", args.transactionId))
+      .collect();
+    const oldParticipantUserIds = new Set(oldParticipants.map((p: any) => p.userId.toString()));
+
     // Re-sync transactionParticipants
     await syncTransactionParticipants(ctx, args.transactionId, existing.createdById, splitFriendIds);
+
+    // Get new participants after sync
+    const newParticipants = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_transaction", (q: any) => q.eq("transactionId", args.transactionId))
+      .collect();
+    const newParticipantUserIds = new Set(newParticipants.map((p: any) => p.userId.toString()));
+
+    // Union of old + new participants to notify everyone affected
+    const allAffectedUserIds = new Set([...oldParticipantUserIds, ...newParticipantUserIds]);
+    const allAffected = Array.from(allAffectedUserIds).map((id) => id as Id<"users">);
+
+    await notifyTransactionParticipants(
+      ctx, args.transactionId, user._id, user.name,
+      "split_edited",
+      `${user.name} edited the split "${args.title}"`,
+      JSON.stringify({ title: args.title, emoji: args.emoji, amount: totalAmount, currency: args.currency }),
+      allAffected
+    );
 
     return args.transactionId;
   },
@@ -1366,6 +1461,15 @@ export const deleteTransaction = mutation({
     }
     requireOwner(transaction.createdById, user._id, "Only the split creator can delete this transaction");
 
+    // Capture participants and metadata BEFORE deletion for activity notifications
+    const participants = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_transaction", (q) => q.eq("transactionId", args.transactionId))
+      .collect();
+    const participantUserIds = participants.map((p) => p.userId as Id<"users">);
+    const txTitle = transaction.title;
+    const txEmoji = transaction.emoji;
+
     // Delete all splits
     const splits = await ctx.db
       .query("splits")
@@ -1377,17 +1481,21 @@ export const deleteTransaction = mutation({
     }
 
     // Delete transactionParticipants
-    const participants = await ctx.db
-      .query("transactionParticipants")
-      .withIndex("by_transaction", (q) => q.eq("transactionId", args.transactionId))
-      .collect();
-
     for (const p of participants) {
       await ctx.db.delete(p._id);
     }
 
     // Delete transaction
     await ctx.db.delete(args.transactionId);
+
+    // Activity: notify all former participants except the deleter
+    await notifyTransactionParticipants(
+      ctx, args.transactionId, user._id, user.name,
+      "split_deleted",
+      `${user.name} deleted the split "${txTitle}"`,
+      JSON.stringify({ title: txTitle, emoji: txEmoji }),
+      participantUserIds
+    );
 
     return true;
   },

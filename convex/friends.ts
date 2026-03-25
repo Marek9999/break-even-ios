@@ -6,6 +6,7 @@ import {
   requireAuthenticatedUser,
   requireOwner,
 } from "./lib/auth";
+import { insertActivity } from "./activities";
 
 /**
  * List all friends for the current user.
@@ -318,6 +319,18 @@ export const deleteFriend = mutation({
       if (reciprocal) {
         await ctx.db.patch(reciprocal._id, { inviteStatus: "removed_by_them" });
       }
+    }
+
+    // Activity: notify the other user they were removed
+    if (friend.linkedUserId) {
+      await insertActivity(ctx, {
+        userId: friend.linkedUserId,
+        actorId: user._id,
+        actorName: user.name,
+        type: "friend_removed",
+        message: `${user.name} removed you from their friends`,
+        friendId: args.friendId,
+      });
     }
 
     // Cancel any pending invitations for this friend

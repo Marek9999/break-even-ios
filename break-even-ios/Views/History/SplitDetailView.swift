@@ -30,7 +30,9 @@ struct SplitDetailView: View {
     // Friends data for edit flow
     @State private var allFriends: [ConvexFriend] = []
     @State private var selfFriend: ConvexFriend?
+    @State private var currentUser: ConvexUser?
     @State private var friendsSubscription: Task<Void, Never>?
+    @State private var currentUserSubscription: Task<Void, Never>?
     
     private var displayTransaction: EnrichedTransaction {
         detailedTransaction ?? transaction
@@ -42,6 +44,25 @@ struct SplitDetailView: View {
     
     private var canDeleteTransaction: Bool {
         displayTransaction.createdById == convexService.currentUserId
+    }
+    
+    private var shareText: String {
+        SplitShareTextBuilder.text(
+            for: displayTransaction,
+            currentUserLabel: currentUserLabel
+        )
+    }
+    
+    private var currentUserLabel: String? {
+        if let username = currentUser?.displayUsername, !username.isEmpty {
+            return username
+        }
+        
+        if let name = currentUser?.name, !name.isEmpty {
+            return name
+        }
+        
+        return nil
     }
     
     private var transitionProgress: CGFloat {
@@ -97,7 +118,7 @@ struct SplitDetailView: View {
                 .animation(.smooth(duration: 0.25), value: transitionProgress >= 0.5)
             }
             if canDeleteTransaction {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(id: "detail-delete", placement: .topBarTrailing) {
                     Button {
                         showDeleteAlert = true
                     } label: {
@@ -108,7 +129,12 @@ struct SplitDetailView: View {
                 }
                 ToolbarSpacer(placement: .topBarTrailing)
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                ShareLink(item: shareText) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.subheadline)
+                }
+                
                 Button {
                     showEditSheet = true
                 } label: {
@@ -141,9 +167,11 @@ struct SplitDetailView: View {
         .onAppear {
             loadDetails()
             subscribeToFriends()
+            subscribeToCurrentUser()
         }
         .onDisappear {
             friendsSubscription?.cancel()
+            currentUserSubscription?.cancel()
         }
     }
     
@@ -571,6 +599,28 @@ struct SplitDetailView: View {
                 await MainActor.run {
                     self.allFriends = friends
                     self.selfFriend = friends.first(where: { $0.isSelf })
+                }
+            }
+        }
+    }
+    
+    private func subscribeToCurrentUser() {
+        guard let clerkId = clerk.user?.id else { return }
+        currentUserSubscription?.cancel()
+        
+        currentUserSubscription = Task {
+            let subscription = convexService.client.subscribe(
+                to: "users:getCurrentUser",
+                with: ["clerkId": clerkId],
+                yielding: ConvexUser?.self
+            )
+            .replaceError(with: nil)
+            .values
+            
+            for await user in subscription {
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    self.currentUser = user
                 }
             }
         }

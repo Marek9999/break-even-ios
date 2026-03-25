@@ -21,6 +21,7 @@ struct NewSplitSheet: View {
     let selfFriend: ConvexFriend?
     let userDefaultCurrency: String
     let receiptResult: ReceiptScanResult?
+    let onSaveSuccess: ((String) -> Void)?
     
     // MARK: - State
     @State private var isSearchActive = false
@@ -49,12 +50,14 @@ struct NewSplitSheet: View {
         allFriends: [ConvexFriend] = [],
         selfFriend: ConvexFriend? = nil,
         userDefaultCurrency: String = "USD",
-        prefilledViewModel: NewSplitViewModel? = nil
+        prefilledViewModel: NewSplitViewModel? = nil,
+        onSaveSuccess: ((String) -> Void)? = nil
     ) {
         self.receiptResult = receiptResult
         self.allFriends = allFriends
         self.selfFriend = selfFriend
         self.userDefaultCurrency = userDefaultCurrency
+        self.onSaveSuccess = onSaveSuccess
         self._viewModel = State(initialValue: prefilledViewModel ?? NewSplitViewModel(preSelectedFriend: preSelectedFriend, defaultCurrency: userDefaultCurrency))
     }
     
@@ -538,9 +541,10 @@ struct NewSplitSheet: View {
         
         Task {
             do {
-                try await viewModel.save(clerkId: clerkId)
+                let transactionId = try await viewModel.save(clerkId: clerkId)
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onSaveSuccess?(transactionId)
                     dismiss()
                 }
             } catch {

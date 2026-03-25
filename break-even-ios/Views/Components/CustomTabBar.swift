@@ -10,23 +10,38 @@ import SwiftUI
 struct CustomTabBar: View {
     @Binding var selectedTab: Int
     @Binding var isHistoryScrolled: Bool
+    @Binding var isActivityScrolled: Bool
     @Binding var searchText: String
     @Binding var isSearchActive: Bool
     let isDetailShowing: Bool
     let userAvatarUrl: String?
     let userInitials: String
+    let unreadActivityCount: Int
     
     @Namespace private var tabBarNamespace
     @Namespace private var searchNamespace
     
     private var isCollapsed: Bool {
-        selectedTab == 1 && isHistoryScrolled && !isDetailShowing
+        (selectedTab == 1 && isHistoryScrolled && !isDetailShowing) ||
+        (selectedTab == 3 && isActivityScrolled && !isDetailShowing)
+    }
+    
+    private var collapsedIcon: String {
+        selectedTab == 3 ? "bolt.fill" : "clock"
+    }
+    
+    private var searchPrompt: String {
+        selectedTab == 3 ? "Search activity..." : "Search splits..."
+    }
+    
+    private var showsFloatingSearch: Bool {
+        (selectedTab == 1 || selectedTab == 3) && !isCollapsed && !isSearchActive && !isDetailShowing
     }
     
     var body: some View {
         GlassEffectContainer(spacing: 20) {
             VStack(spacing: 8) {
-                if selectedTab == 1 && !isCollapsed && !isSearchActive && !isDetailShowing {
+                if showsFloatingSearch {
                     floatingSearchButton
                 }
                 
@@ -65,10 +80,14 @@ struct CustomTabBar: View {
         if isCollapsed {
             Button {
                 withAnimation(.spring(duration: 0.35)) {
-                    isHistoryScrolled = false
+                    if selectedTab == 1 {
+                        isHistoryScrolled = false
+                    } else if selectedTab == 3 {
+                        isActivityScrolled = false
+                    }
                 }
             } label: {
-                Image(systemName: "clock")
+                Image(systemName: collapsedIcon)
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.white)
                     .frame(width: 48, height: 48)
@@ -79,6 +98,7 @@ struct CustomTabBar: View {
             HStack(spacing: 0) {
                 tabIcon(symbol: "house", tab: 0)
                 tabIcon(symbol: "clock", tab: 1)
+                activityTabIcon
             }
             .padding(8)
             .glassEffect(.regular, in: .capsule)
@@ -105,6 +125,44 @@ struct CustomTabBar: View {
         }
         .transaction { transaction in
             if !isTabSelected(tab) {
+                transaction.animation = nil
+            }
+        }
+    }
+    
+    // MARK: - Activity Tab Icon (with badge)
+    
+    private var activityTabIcon: some View {
+        Button {
+            withAnimation(.spring(duration: 0.35)) {
+                selectedTab = 3
+            }
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 20, weight: isTabSelected(3) ? .medium : .regular))
+                    .foregroundStyle(.white.opacity(iconOpacity(for: 3)))
+                    .frame(width: 72, height: 48)
+                    .background(isTabSelected(3) ? Color.text.opacity(0.1) : Color.text.opacity(0))
+                    .containerShape(Capsule())
+                
+                if unreadActivityCount > 0 && selectedTab != 3 {
+                    Text(unreadActivityCount > 99 ? "99+" : "\(unreadActivityCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                        .offset(x: -8, y: 4)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+        }
+        .transaction { transaction in
+            if !isTabSelected(3) {
                 transaction.animation = nil
             }
         }
@@ -217,7 +275,7 @@ struct CustomTabBar: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.text)
                 
-                Text(searchText.isEmpty ? "Search splits..." : searchText)
+                Text(searchText.isEmpty ? searchPrompt : searchText)
                     .font(.body)
                     .foregroundStyle(.text.opacity(0.6))
                     .lineLimit(1)
@@ -239,6 +297,7 @@ private struct CustomTabBarPreview: View {
     @State private var selectedTab = 0
     @State private var searchText = ""
     @State private var isScrolled = false
+    @State private var isActivityScrolled = false
     @State private var isSearchActive = false
     
     var body: some View {
@@ -246,7 +305,7 @@ private struct CustomTabBarPreview: View {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 16) {
-                Text("Selected: \(["Home", "History", "History (collapsed)", "Profile"][min(selectedTab == 1 && isScrolled ? 2 : selectedTab, 3)])")
+                Text("Selected: \(["Home", "History", "Profile", "Activity"][min(selectedTab, 3)])")
                     .foregroundStyle(.white)
                     .font(.headline)
                 
@@ -257,8 +316,8 @@ private struct CustomTabBarPreview: View {
                     Button("History") {
                         withAnimation { selectedTab = 1; isScrolled = false }
                     }
-                    Button("Collapsed") {
-                        withAnimation { selectedTab = 1; isScrolled = true }
+                    Button("Activity") {
+                        withAnimation { selectedTab = 3; isActivityScrolled = false }
                     }
                     Button("Profile") {
                         withAnimation { selectedTab = 2; isScrolled = false }
@@ -274,11 +333,13 @@ private struct CustomTabBarPreview: View {
             CustomTabBar(
                 selectedTab: $selectedTab,
                 isHistoryScrolled: $isScrolled,
+                isActivityScrolled: $isActivityScrolled,
                 searchText: $searchText,
                 isSearchActive: $isSearchActive,
                 isDetailShowing: false,
                 userAvatarUrl: nil,
-                userInitials: "RD"
+                userInitials: "RD",
+                unreadActivityCount: 5
             )
         }
     }
