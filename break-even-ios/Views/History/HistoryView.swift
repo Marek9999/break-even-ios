@@ -30,6 +30,10 @@ struct HistoryView: View {
     
     @State private var navigationPath = NavigationPath()
     
+    private var subscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
+    }
+    
     init(
         searchText: Binding<String>,
         isScrolled: Binding<Bool>,
@@ -62,7 +66,14 @@ struct HistoryView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     if viewModel.filteredTransactions.isEmpty {
-                        if !viewModel.searchText.isEmpty {
+                        if let error = viewModel.error {
+                            ContentUnavailableView(
+                                "Couldn't Load Transactions",
+                                systemImage: "wifi.exclamationmark",
+                                description: Text(error)
+                            )
+                            .frame(minHeight: 400)
+                        } else if !viewModel.searchText.isEmpty {
                             ContentUnavailableView(
                                 "No Results",
                                 systemImage: "magnifyingglass",
@@ -122,7 +133,7 @@ struct HistoryView: View {
             // .safeAreaInset(edge: .bottom) {
             //     searchAccessory
             // }
-            .task(id: clerk.user?.id) {
+            .task(id: subscriptionKey) {
                 startSubscriptions()
             }
             .onChange(of: searchText) { _, newValue in
@@ -133,6 +144,25 @@ struct HistoryView: View {
             }
             .navigationDestination(for: String.self) { transactionId in
                 TransactionDetailLoader(transactionId: transactionId)
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let error = viewModel.error, !viewModel.transactions.isEmpty {
+                    Button {
+                        Task {
+                            try? await convexService.recoverAuthenticatedSession(
+                                clerk: clerk,
+                                forceTokenRefresh: true
+                            )
+                        }
+                    } label: {
+                        Label(error, systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .onChange(of: navigationPath.count) { _, newCount in

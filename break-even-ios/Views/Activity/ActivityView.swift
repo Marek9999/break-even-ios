@@ -10,6 +10,7 @@ internal import Combine
 
 struct ActivityView: View {
     @Environment(\.clerk) private var clerk
+    @Environment(\.convexService) private var convexService
     
     @State private var viewModel = ActivityViewModel()
     @State private var navigationPath = NavigationPath()
@@ -19,6 +20,10 @@ struct ActivityView: View {
     @Binding var isDetailShowing: Bool
     
     var onNavigateToFriends: (() -> Void)?
+    
+    private var subscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
+    }
     
     init(
         searchText: Binding<String>,
@@ -37,7 +42,14 @@ struct ActivityView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if viewModel.groupedActivities.isEmpty {
-                        if !viewModel.searchText.isEmpty {
+                        if let error = viewModel.errorMessage {
+                            ContentUnavailableView(
+                                "Couldn't Load Activity",
+                                systemImage: "wifi.exclamationmark",
+                                description: Text(error)
+                            )
+                            .frame(minHeight: 400)
+                        } else if !viewModel.searchText.isEmpty {
                             ContentUnavailableView(
                                 "No Results",
                                 systemImage: "magnifyingglass",
@@ -93,7 +105,7 @@ struct ActivityView: View {
                     }
                 }
             }
-            .task(id: clerk.user?.id) {
+            .task(id: subscriptionKey) {
                 startSubscriptions()
             }
             .onChange(of: searchText) { _, newValue in
@@ -101,6 +113,25 @@ struct ActivityView: View {
             }
             .navigationDestination(for: String.self) { transactionId in
                 TransactionDetailLoader(transactionId: transactionId)
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let error = viewModel.errorMessage, !viewModel.activities.isEmpty {
+                    Button {
+                        Task {
+                            try? await convexService.recoverAuthenticatedSession(
+                                clerk: clerk,
+                                forceTokenRefresh: true
+                            )
+                        }
+                    } label: {
+                        Label(error, systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .onChange(of: navigationPath.count) { _, newCount in

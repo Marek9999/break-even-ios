@@ -55,23 +55,38 @@ class ProfileViewModel {
     private var invitationsSubscription: Task<Void, Never>?
     private var receivedInvitationsSubscription: Task<Void, Never>?
     
+    private func handleSubscriptionFailure(_ context: String, error: Error) {
+        self.error = "Couldn't refresh Profile right now."
+        
+        #if DEBUG
+        print("Profile subscription failed (\(context)): \(error)")
+        #endif
+    }
+    
     /// Subscribe to friends list
     func subscribeToFriends(clerkId: String) {
         friendsSubscription?.cancel()
         
         friendsSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "friends:listFriends",
-                with: ["clerkId": clerkId],
-                yielding: [ConvexFriend].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await friendsList in subscription {
-                if Task.isCancelled { break }
-                self.friends = friendsList
+            do {
+                let subscription = client.subscribe(
+                    to: "friends:listFriends",
+                    with: ["clerkId": clerkId],
+                    yielding: [ConvexFriend].self
+                )
+                .values
+                
+                for try await friendsList in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.friends = friendsList
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("friends:listFriends", error: error)
             }
         }
     }
@@ -82,17 +97,24 @@ class ProfileViewModel {
         
         userSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "users:getCurrentUser",
-                with: ["clerkId": clerkId],
-                yielding: ConvexUser?.self
-            )
-            .replaceError(with: nil)
-            .values
-            
-            for await user in subscription {
-                if Task.isCancelled { break }
-                self.currentUser = user
+            do {
+                let subscription = client.subscribe(
+                    to: "users:getCurrentUser",
+                    with: ["clerkId": clerkId],
+                    yielding: ConvexUser?.self
+                )
+                .values
+                
+                for try await user in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.currentUser = user
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("users:getCurrentUser", error: error)
             }
         }
     }
@@ -103,17 +125,24 @@ class ProfileViewModel {
         
         invitationsSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "invitations:listSentInvitations",
-                with: ["clerkId": clerkId],
-                yielding: [EnrichedInvitation].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await invites in subscription {
-                if Task.isCancelled { break }
-                self.sentInvitations = invites
+            do {
+                let subscription = client.subscribe(
+                    to: "invitations:listSentInvitations",
+                    with: ["clerkId": clerkId],
+                    yielding: [EnrichedInvitation].self
+                )
+                .values
+                
+                for try await invites in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.sentInvitations = invites
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("invitations:listSentInvitations", error: error)
             }
         }
     }
@@ -124,17 +153,24 @@ class ProfileViewModel {
         
         receivedInvitationsSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "invitations:listReceivedInvitations",
-                with: ["clerkId": clerkId],
-                yielding: [ReceivedInvitation].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await invites in subscription {
-                if Task.isCancelled { break }
-                self.receivedInvitations = invites
+            do {
+                let subscription = client.subscribe(
+                    to: "invitations:listReceivedInvitations",
+                    with: ["clerkId": clerkId],
+                    yielding: [ReceivedInvitation].self
+                )
+                .values
+                
+                for try await invites in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.receivedInvitations = invites
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("invitations:listReceivedInvitations", error: error)
             }
         }
     }

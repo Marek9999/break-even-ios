@@ -37,26 +37,42 @@ class ActivityViewModel {
     var unreadCount: Int = 0
     var searchText: String = ""
     var timeRange: ActivityTimeRange = .allTime
+    var errorMessage: String?
     
     private var activitiesSubscription: Task<Void, Never>?
     private var unreadSubscription: Task<Void, Never>?
+    
+    private func handleSubscriptionFailure(_ context: String, error: Error) {
+        self.errorMessage = "Couldn't refresh Activity right now."
+        
+        #if DEBUG
+        print("Activity subscription failed (\(context)): \(error)")
+        #endif
+    }
     
     func subscribeToActivities(clerkId: String) {
         activitiesSubscription?.cancel()
         
         activitiesSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "activities:listActivities",
-                with: ["clerkId": clerkId],
-                yielding: [ConvexActivity].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await items in subscription {
-                if Task.isCancelled { break }
-                self.activities = items
+            do {
+                let subscription = client.subscribe(
+                    to: "activities:listActivities",
+                    with: ["clerkId": clerkId],
+                    yielding: [ConvexActivity].self
+                )
+                .values
+                
+                for try await items in subscription {
+                    if Task.isCancelled { break }
+                    self.errorMessage = nil
+                    self.activities = items
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("activities:listActivities", error: error)
             }
         }
     }
@@ -66,17 +82,24 @@ class ActivityViewModel {
         
         unreadSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "activities:getUnreadCount",
-                with: ["clerkId": clerkId],
-                yielding: Int.self
-            )
-            .replaceError(with: 0)
-            .values
-            
-            for await count in subscription {
-                if Task.isCancelled { break }
-                self.unreadCount = count
+            do {
+                let subscription = client.subscribe(
+                    to: "activities:getUnreadCount",
+                    with: ["clerkId": clerkId],
+                    yielding: Int.self
+                )
+                .values
+                
+                for try await count in subscription {
+                    if Task.isCancelled { break }
+                    self.errorMessage = nil
+                    self.unreadCount = count
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("activities:getUnreadCount", error: error)
             }
         }
     }

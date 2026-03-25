@@ -40,6 +40,10 @@ struct ProfileView: View {
     @State private var editedUsername = ""
     @State private var usernameError: String?
     
+    private var subscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
+    }
+    
     private var displayName: String {
         if let convexName = viewModel.currentUser?.name, !convexName.isEmpty {
             return convexName
@@ -85,6 +89,23 @@ struct ProfileView: View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(spacing: 24) {
+                    if let error = viewModel.error {
+                        Button {
+                            Task {
+                                try? await convexService.recoverAuthenticatedSession(
+                                    clerk: clerk,
+                                    forceTokenRefresh: true
+                                )
+                            }
+                        } label: {
+                            Label(error, systemImage: "arrow.clockwise")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
                     headerSection
                     infoSection
                     cardsSection
@@ -177,7 +198,7 @@ struct ProfileView: View {
             .onChange(of: externalNavigationRequest) { _, newValue in
                 handleExternalNavigation(newValue)
             }
-            .task(id: clerk.user?.id) {
+            .task(id: subscriptionKey) {
                 startSubscriptions()
             }
             .task(id: clerk.user?.imageUrl) {

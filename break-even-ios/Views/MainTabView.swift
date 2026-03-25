@@ -32,9 +32,6 @@ struct MainTabView: View {
     
     @FocusState private var isSearchFocused: Bool
     
-    @State private var keyboardPrewarmText = ""
-    @FocusState private var keyboardPrewarmFocused: Bool
-    
     private var userAvatarUrl: String? {
         clerk.user?.imageUrl
     }
@@ -68,6 +65,10 @@ struct MainTabView: View {
     
     private var searchPlaceholder: String {
         selectedTab == 3 ? "Search activity..." : "Search past splits..."
+    }
+    
+    private var subscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
     }
     
     var body: some View {
@@ -175,22 +176,12 @@ struct MainTabView: View {
                 if isActivitySearchActive { cancelActivitySearch() }
             }
         }
-        .task(id: clerk.user?.id) {
+        .task(id: subscriptionKey) {
             if let clerkId = clerk.user?.id {
                 activityViewModel.subscribeToUnreadCount(clerkId: clerkId)
             }
         }
-        .background {
-            TextField("", text: $keyboardPrewarmText)
-                .focused($keyboardPrewarmFocused)
-                .keyboardType(.decimalPad)
-                .opacity(0)
-                .frame(width: 1, height: 1)
-                .offset(x: -1000)
-                .allowsHitTesting(false)
-        }
         .onAppear {
-            prewarmKeyboard()
             applyPendingNotificationRouteIfNeeded()
         }
         .onChange(of: notificationManager.pendingRoute) { _, _ in
@@ -263,15 +254,6 @@ struct MainTabView: View {
             activitySearchText = ""
         }
         isSearchFocused = false
-    }
-    
-    private func prewarmKeyboard() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            keyboardPrewarmFocused = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                keyboardPrewarmFocused = false
-            }
-        }
     }
     
     private func applyPendingNotificationRouteIfNeeded() {

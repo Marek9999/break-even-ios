@@ -23,6 +23,11 @@ DerivedDataLocal/
 # Swift Package Manager
 .build/
 Packages/
+.sourcepackages/
+.spmcache/
+
+# Local Xcode caches
+.deriveddata/
 
 # CocoaPods
 Pods/

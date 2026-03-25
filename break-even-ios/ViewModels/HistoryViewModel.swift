@@ -40,23 +40,38 @@ class HistoryViewModel {
     private var transactionsSubscription: Task<Void, Never>?
     private var userSubscription: Task<Void, Never>?
     
+    private func handleSubscriptionFailure(_ context: String, error: Error) {
+        self.error = "Couldn't refresh History right now."
+        
+        #if DEBUG
+        print("History subscription failed (\(context)): \(error)")
+        #endif
+    }
+    
     /// Subscribe to transactions
     func subscribeToTransactions(clerkId: String) {
         transactionsSubscription?.cancel()
         
         transactionsSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "transactions:listTransactions",
-                with: ["clerkId": clerkId],
-                yielding: [EnrichedTransaction].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await txs in subscription {
-                if Task.isCancelled { break }
-                self.transactions = txs
+            do {
+                let subscription = client.subscribe(
+                    to: "transactions:listTransactions",
+                    with: ["clerkId": clerkId],
+                    yielding: [EnrichedTransaction].self
+                )
+                .values
+                
+                for try await txs in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.transactions = txs
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("transactions:listTransactions", error: error)
             }
         }
     }
@@ -67,17 +82,24 @@ class HistoryViewModel {
         
         userSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "users:getCurrentUser",
-                with: ["clerkId": clerkId],
-                yielding: ConvexUser?.self
-            )
-            .replaceError(with: nil)
-            .values
-            
-            for await user in subscription {
-                if Task.isCancelled { break }
-                self.currentUser = user
+            do {
+                let subscription = client.subscribe(
+                    to: "users:getCurrentUser",
+                    with: ["clerkId": clerkId],
+                    yielding: ConvexUser?.self
+                )
+                .values
+                
+                for try await user in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.currentUser = user
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("users:getCurrentUser", error: error)
             }
         }
     }

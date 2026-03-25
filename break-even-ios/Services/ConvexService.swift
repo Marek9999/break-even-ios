@@ -9,6 +9,13 @@ import Foundation
 import SwiftUI
 import ConvexMobile
 import Clerk
+internal import Combine
+
+enum ConvexSessionState: Equatable {
+    case loading
+    case authenticated
+    case unauthenticated
+}
 
 // MARK: - Clerk Auth Provider for Convex
 
@@ -23,13 +30,17 @@ final class ClerkConvexAuthProvider: ConvexMobile.AuthProvider {
         }
         
         do {
-            let options = Session.GetTokenOptions(template: "convex")
+            let options = Session.GetTokenOptions(
+                template: "convex",
+                skipCache: forceRefresh
+            )
             
             if let tokenResource = try await session.getToken(options) {
                 return tokenResource.jwt
             }
             
-            if let tokenResource = try await session.getToken() {
+            let fallbackOptions = Session.GetTokenOptions(skipCache: forceRefresh)
+            if let tokenResource = try await session.getToken(fallbackOptions) {
                 return tokenResource.jwt
             }
             
@@ -49,7 +60,7 @@ final class ClerkConvexAuthProvider: ConvexMobile.AuthProvider {
     }
     
     func login() async throws -> String {
-        try await fetchToken(forceRefresh: false)
+        try await fetchToken(forceRefresh: true)
     }
     
     func loginFromCache() async throws -> String {
@@ -83,6 +94,9 @@ final class ConvexService {
     /// Track connection status
     var isConnected = false
     
+    /// Auth state reported by Convex's authenticated client.
+    var sessionState: ConvexSessionState = .loading
+    
     /// Track if user is synced with Convex
     var isUserSynced = false
     
@@ -91,6 +105,21 @@ final class ConvexService {
     
     /// Set to true when the deployment URL is invalid so callers can show an error.
     var hasConfigurationError = false
+    
+    /// Human-readable websocket state for debug and recovery UI.
+    var webSocketStatus = "connecting"
+    
+    /// Recovery UI should treat this as an in-flight auth refresh.
+    var isRecoveringSession = false
+    
+    /// Exposes the latest recovery error without forcing screens to infer from empty data.
+    var lastRecoveryError: String?
+    
+    /// Increment to restart view subscriptions after a successful recovery.
+    var subscriptionRestartToken = 0
+    
+    private var authStateTask: Task<Void, Never>?
+    private var webSocketStateTask: Task<Void, Never>?
     
     private init() {
         let deploymentUrl = Configuration.convexDeploymentURL
@@ -118,6 +147,9 @@ final class ConvexService {
         #if DEBUG
         print("🔌 ConvexService initialized successfully")
         #endif
+        
+        observeAuthState()
+        observeWebSocketState()
     }
     
     // MARK: - Authentication Helpers
@@ -126,9 +158,47 @@ final class ConvexService {
         switch await client.loginFromCache() {
         case .success:
             isConnected = true
+            lastRecoveryError = nil
         case .failure(let error):
             isConnected = false
             throw error
+        }
+    }
+    
+    private func observeAuthState() {
+        authStateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await state in self.client.authState.values {
+                if Task.isCancelled { break }
+                switch state {
+                case .loading:
+                    self.sessionState = .loading
+                case .authenticated:
+                    self.sessionState = .authenticated
+                    self.lastRecoveryError = nil
+                case .unauthenticated:
+                    self.sessionState = .unauthenticated
+                    self.isConnected = false
+                }
+                
+                #if DEBUG
+                print("🔐 Convex auth state -> \(self.sessionState)")
+                #endif
+            }
+        }
+    }
+    
+    private func observeWebSocketState() {
+        webSocketStateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await state in self.client.watchWebSocketState().values {
+                if Task.isCancelled { break }
+                self.webSocketStatus = String(describing: state)
+                
+                #if DEBUG
+                print("🔌 Convex websocket state -> \(self.webSocketStatus)")
+                #endif
+            }
         }
     }
     
@@ -186,16 +256,62 @@ final class ConvexService {
         }
     }
     
+    /// Revalidate Convex auth and resubscribe consumers when the app becomes active.
+    func recoverAuthenticatedSession(clerk: Clerk, forceTokenRefresh: Bool = true) async throws {
+        guard clerk.session != nil, clerk.user != nil else {
+            await signOut()
+            return
+        }
+        
+        isRecoveringSession = true
+        lastRecoveryError = nil
+        
+        #if DEBUG
+        print("🔄 Starting Convex recovery (forceTokenRefresh: \(forceTokenRefresh))")
+        #endif
+        
+        defer {
+            isRecoveringSession = false
+        }
+        
+        do {
+            if forceTokenRefresh {
+                _ = try await authProvider.fetchToken(forceRefresh: true)
+            }
+            
+            try await syncUser(clerk: clerk)
+            subscriptionRestartToken += 1
+            
+            #if DEBUG
+            print("✅ Convex recovery finished")
+            #endif
+        } catch {
+            isConnected = false
+            lastRecoveryError = error.localizedDescription
+            
+            #if DEBUG
+            print("❌ Convex recovery failed: \(error)")
+            #endif
+            
+            throw error
+        }
+    }
+    
     /// Sign out and clear Convex auth
     func signOut() async {
         await client.logout()
         isConnected = false
+        sessionState = .unauthenticated
         isUserSynced = false
         currentUserId = nil
+        lastRecoveryError = nil
+        isRecoveringSession = false
+        subscriptionRestartToken += 1
     }
     
     /// Refresh the Convex auth token from Clerk
     func refreshToken() async throws {
+        _ = try await authProvider.fetchToken(forceRefresh: true)
         try await ensureAuthenticatedClient()
     }
     

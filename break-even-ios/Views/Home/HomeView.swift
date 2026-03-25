@@ -29,6 +29,10 @@ struct HomeView: View {
     
     let onOpenTransactionInHistory: ((String) -> Void)?
     
+    private var subscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
+    }
+    
     private var currentTabData: [FriendWithBalance] {
         selectedTab == .owedToYou ? viewModel.owedToMe : viewModel.iOwe
     }
@@ -128,7 +132,7 @@ struct HomeView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .task(id: clerk.user?.id) {
+        .task(id: subscriptionKey) {
             startSubscriptions()
         }
     }
@@ -152,7 +156,13 @@ struct HomeView: View {
     
     @ViewBuilder
     private var bubbleClusterSection: some View {
-        if currentTabData.isEmpty {
+        if let error = viewModel.error, currentTabData.isEmpty {
+            ContentUnavailableView(
+                "Couldn't Load Your Balances",
+                systemImage: "wifi.exclamationmark",
+                description: Text(error)
+            )
+        } else if currentTabData.isEmpty {
             BubbleClusterEmptyView(isOwedToUser: selectedTab == .owedToYou)
         } else {
             BubbleClusterView(
@@ -171,7 +181,25 @@ struct HomeView: View {
     
     private var actionButtons: some View {
         GlassEffectContainer {
-            HStack(spacing: 8) {
+            VStack(spacing: 12) {
+                if let error = viewModel.error {
+                    Button {
+                        Task {
+                            try? await convexService.recoverAuthenticatedSession(
+                                clerk: clerk,
+                                forceTokenRefresh: true
+                            )
+                        }
+                    } label: {
+                        Label(error, systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                HStack(spacing: 8) {
                 Button {
                     splitSheetConfig = SplitSheetConfig(preSelectedFriend: nil)
                     let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -200,6 +228,7 @@ struct HomeView: View {
                         .frame(width: 56, height: 56)
                         .glassEffect(.clear.tint(.accent.opacity(0.2)).interactive())
                 }
+            }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)

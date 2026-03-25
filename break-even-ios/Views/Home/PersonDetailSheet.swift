@@ -90,10 +90,6 @@ struct PersonDetailSheet: View {
     @State private var selectedTransactionForDetail: EnrichedTransaction?
     @State private var detentsLocked = false
     
-    // Keyboard pre-warming
-    @State private var keyboardPrewarmText = ""
-    @FocusState private var keyboardPrewarmFocused: Bool
-    
     private var transitionProgress: CGFloat {
         let progress = min(max(((scrollOffset + 74) / 74), 0), 1)
         return progress
@@ -328,14 +324,6 @@ struct PersonDetailSheet: View {
             .onAppear {
                 loadActivity()
                 extractDominantColorIfNeeded()
-                prewarmKeyboard()
-            }
-            .background {
-                // Hidden TextField for keyboard pre-warming
-                TextField("", text: $keyboardPrewarmText)
-                    .focused($keyboardPrewarmFocused)
-                    .opacity(0)
-                    .frame(width: 0, height: 0)
             }
             .onChange(of: friend.id) { _, _ in
                 // Reset dominant color and cached image when friend changes
@@ -428,19 +416,6 @@ struct PersonDetailSheet: View {
                 await MainActor.run {
                     self.liveBalance = updatedBalance
                 }
-            }
-        }
-    }
-    
-    // MARK: - Keyboard Pre-warming
-    
-    /// Pre-warm the keyboard system to avoid first-use lag
-    private func prewarmKeyboard() {
-        // Brief focus/unfocus cycle to initialize keyboard system
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            keyboardPrewarmFocused = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                keyboardPrewarmFocused = false
             }
         }
     }

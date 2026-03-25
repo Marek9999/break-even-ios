@@ -34,25 +34,40 @@ class HomeViewModel {
     private var friendsSubscription: Task<Void, Never>?
     private var userSubscription: Task<Void, Never>?
     
+    private func handleSubscriptionFailure(_ context: String, error: Error) {
+        self.error = "Couldn't refresh Home data right now."
+        
+        #if DEBUG
+        print("Home subscription failed (\(context)): \(error)")
+        #endif
+    }
+    
     /// Subscribe to friends with balances
     func subscribeToBalances(clerkId: String) {
         balancesSubscription?.cancel()
         
         balancesSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "friends:getFriendsWithBalances",
-                with: ["clerkId": clerkId],
-                yielding: FriendsWithBalancesResponse.self
-            )
-            .replaceError(with: FriendsWithBalancesResponse(balances: [], userCurrency: "USD"))
-            .values
-            
-            for await response in subscription {
-                if Task.isCancelled { break }
-                self.friendsWithBalances = response.balances
-                // userCurrency from response can be used if needed, 
-                // but we already have it from currentUser subscription
+            do {
+                let subscription = client.subscribe(
+                    to: "friends:getFriendsWithBalances",
+                    with: ["clerkId": clerkId],
+                    yielding: FriendsWithBalancesResponse.self
+                )
+                .values
+                
+                for try await response in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.friendsWithBalances = response.balances
+                    // userCurrency from response can be used if needed,
+                    // but we already have it from currentUser subscription
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("friends:getFriendsWithBalances", error: error)
             }
         }
     }
@@ -63,18 +78,25 @@ class HomeViewModel {
         
         friendsSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "friends:listFriends",
-                with: ["clerkId": clerkId],
-                yielding: [ConvexFriend].self
-            )
-            .replaceError(with: [])
-            .values
-            
-            for await friends in subscription {
-                if Task.isCancelled { break }
-                self.allFriends = friends
-                self.selfFriend = friends.first(where: { $0.isSelf })
+            do {
+                let subscription = client.subscribe(
+                    to: "friends:listFriends",
+                    with: ["clerkId": clerkId],
+                    yielding: [ConvexFriend].self
+                )
+                .values
+                
+                for try await friends in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.allFriends = friends
+                    self.selfFriend = friends.first(where: { $0.isSelf })
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("friends:listFriends", error: error)
             }
         }
     }
@@ -85,17 +107,24 @@ class HomeViewModel {
         
         userSubscription = Task {
             let client = ConvexService.shared.client
-            let subscription = client.subscribe(
-                to: "users:getCurrentUser",
-                with: ["clerkId": clerkId],
-                yielding: ConvexUser?.self
-            )
-            .replaceError(with: nil)
-            .values
-            
-            for await user in subscription {
-                if Task.isCancelled { break }
-                self.currentUser = user
+            do {
+                let subscription = client.subscribe(
+                    to: "users:getCurrentUser",
+                    with: ["clerkId": clerkId],
+                    yielding: ConvexUser?.self
+                )
+                .values
+                
+                for try await user in subscription {
+                    if Task.isCancelled { break }
+                    self.error = nil
+                    self.currentUser = user
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                if Task.isCancelled { return }
+                handleSubscriptionFailure("users:getCurrentUser", error: error)
             }
         }
     }
