@@ -1,5 +1,5 @@
 {
-  "originHash" : "dd597e6a02fba2aa0b45746b15269390d8a7366cb8e101f4259eab51a2fcda79",
+  "originHash" : "a87812587fc5eaf7fa10c4b3c175ecf42fec48ff0d1eb6ff80f20e34393031bf",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "31249885da1052872e0ac91a2943f62567c0d96d",
         "version" : "2.2.1"
+      }
+    },
+    {
+      "identity" : "glur",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/joogps/Glur",
+      "state" : {
+        "revision" : "178af6499ed7957c7f91187fdee2b09d322f5b87",
+        "version" : "1.1.0"
       }
     },
     {

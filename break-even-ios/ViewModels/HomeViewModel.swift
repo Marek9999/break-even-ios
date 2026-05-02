@@ -22,17 +22,10 @@ class HomeViewModel {
     var friendsWithBalances: [FriendWithBalance] = []
     var selfFriend: ConvexFriend?
     var allFriends: [ConvexFriend] = []
-    var currentUser: ConvexUser?
-    
-    // User's default currency (derived from currentUser)
-    var userCurrency: String {
-        currentUser?.defaultCurrency ?? "USD"
-    }
     
     // Subscriptions
     private var balancesSubscription: Task<Void, Never>?
     private var friendsSubscription: Task<Void, Never>?
-    private var userSubscription: Task<Void, Never>?
     
     private func handleSubscriptionFailure(_ context: String, error: Error) {
         self.error = "Couldn't refresh Home data right now."
@@ -101,39 +94,10 @@ class HomeViewModel {
         }
     }
     
-    /// Subscribe to current user (for settings like default currency)
-    func subscribeToUser(clerkId: String) {
-        userSubscription?.cancel()
-        
-        userSubscription = Task {
-            let client = ConvexService.shared.client
-            do {
-                let subscription = client.subscribe(
-                    to: "users:getCurrentUser",
-                    with: ["clerkId": clerkId],
-                    yielding: ConvexUser?.self
-                )
-                .values
-                
-                for try await user in subscription {
-                    if Task.isCancelled { break }
-                    self.error = nil
-                    self.currentUser = user
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                if Task.isCancelled { return }
-                handleSubscriptionFailure("users:getCurrentUser", error: error)
-            }
-        }
-    }
-    
     /// Unsubscribe from all subscriptions
     func unsubscribe() {
         balancesSubscription?.cancel()
         friendsSubscription?.cancel()
-        userSubscription?.cancel()
     }
     
     // MARK: - Computed Properties

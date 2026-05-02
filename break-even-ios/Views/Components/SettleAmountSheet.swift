@@ -47,7 +47,7 @@ struct TextPathHelper {
         }
         
         // Core Text paths are upside down; flip them
-        var path = Path(cgPath)
+        let path = Path(cgPath)
         let bounds = path.boundingRect
         let transform = CGAffineTransform(scaleX: 1, y: -1)
             .translatedBy(x: 0, y: -bounds.height)

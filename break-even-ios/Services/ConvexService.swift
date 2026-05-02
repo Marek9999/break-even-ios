@@ -120,6 +120,7 @@ final class ConvexService {
     
     private var authStateTask: Task<Void, Never>?
     private var webSocketStateTask: Task<Void, Never>?
+    private var activeRecoveryTask: Task<Bool, Error>?
     
     private init() {
         let deploymentUrl = Configuration.convexDeploymentURL
@@ -256,49 +257,75 @@ final class ConvexService {
         }
     }
     
-    /// Revalidate Convex auth and resubscribe consumers when the app becomes active.
-    func recoverAuthenticatedSession(clerk: Clerk, forceTokenRefresh: Bool = true) async throws {
-        guard clerk.session != nil, clerk.user != nil else {
-            await signOut()
-            return
+    /// Revalidate Convex auth and resubscribe consumers only when necessary.
+    @discardableResult
+    func recoverAuthenticatedSession(
+        clerk: Clerk,
+        forceTokenRefresh: Bool = true,
+        restartSubscriptions: Bool = true
+    ) async throws -> Bool {
+        if let activeRecoveryTask {
+            return try await activeRecoveryTask.value
         }
-        
-        isRecoveringSession = true
-        lastRecoveryError = nil
-        
-        #if DEBUG
-        print("🔄 Starting Convex recovery (forceTokenRefresh: \(forceTokenRefresh))")
-        #endif
-        
-        defer {
-            isRecoveringSession = false
-        }
-        
-        do {
-            if forceTokenRefresh {
-                _ = try await authProvider.fetchToken(forceRefresh: true)
+
+        let recoveryTask = Task<Bool, Error> { @MainActor in
+            guard clerk.session != nil, clerk.user != nil else {
+                await signOut()
+                return true
             }
-            
-            try await syncUser(clerk: clerk)
-            subscriptionRestartToken += 1
-            
+
+            if !forceTokenRefresh, sessionState == .authenticated, lastRecoveryError == nil {
+                return false
+            }
+
+            isRecoveringSession = true
+            lastRecoveryError = nil
+
             #if DEBUG
-            print("✅ Convex recovery finished")
+            print("🔄 Starting Convex recovery (forceTokenRefresh: \(forceTokenRefresh), restartSubscriptions: \(restartSubscriptions))")
             #endif
-        } catch {
-            isConnected = false
-            lastRecoveryError = error.localizedDescription
-            
-            #if DEBUG
-            print("❌ Convex recovery failed: \(error)")
-            #endif
-            
-            throw error
+
+            defer {
+                isRecoveringSession = false
+                activeRecoveryTask = nil
+            }
+
+            do {
+                if forceTokenRefresh {
+                    _ = try await authProvider.fetchToken(forceRefresh: true)
+                }
+
+                try await syncUser(clerk: clerk)
+
+                if restartSubscriptions {
+                    subscriptionRestartToken += 1
+                }
+
+                #if DEBUG
+                print("✅ Convex recovery finished")
+                #endif
+
+                return restartSubscriptions
+            } catch {
+                isConnected = false
+                lastRecoveryError = error.localizedDescription
+
+                #if DEBUG
+                print("❌ Convex recovery failed: \(error)")
+                #endif
+
+                throw error
+            }
         }
+
+        activeRecoveryTask = recoveryTask
+        return try await recoveryTask.value
     }
     
     /// Sign out and clear Convex auth
     func signOut() async {
+        activeRecoveryTask?.cancel()
+        activeRecoveryTask = nil
         await client.logout()
         isConnected = false
         sessionState = .unauthenticated

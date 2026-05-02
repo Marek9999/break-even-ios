@@ -14,12 +14,15 @@ struct ActivityView: View {
     
     @State private var viewModel = ActivityViewModel()
     @State private var navigationPath = NavigationPath()
+    @State private var activityScrollProgress: CGFloat = 0
     
     @Binding var searchText: String
     @Binding var isScrolled: Bool
     @Binding var isDetailShowing: Bool
     
     var onNavigateToFriends: (() -> Void)?
+    var usesSheetChrome: Bool
+    var onDismiss: (() -> Void)?
     
     private var subscriptionKey: String {
         "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
@@ -29,79 +32,93 @@ struct ActivityView: View {
         searchText: Binding<String>,
         isScrolled: Binding<Bool>,
         isDetailShowing: Binding<Bool>,
-        onNavigateToFriends: (() -> Void)? = nil
+        onNavigateToFriends: (() -> Void)? = nil,
+        usesSheetChrome: Bool = false,
+        onDismiss: (() -> Void)? = nil
     ) {
         _searchText = searchText
         _isScrolled = isScrolled
         _isDetailShowing = isDetailShowing
         self.onNavigateToFriends = onNavigateToFriends
+        self.usesSheetChrome = usesSheetChrome
+        self.onDismiss = onDismiss
     }
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if viewModel.groupedActivities.isEmpty {
-                        if let error = viewModel.errorMessage {
-                            ContentUnavailableView(
-                                "Couldn't Load Activity",
-                                systemImage: "wifi.exclamationmark",
-                                description: Text(error)
-                            )
-                            .frame(minHeight: 400)
-                        } else if !viewModel.searchText.isEmpty {
-                            ContentUnavailableView(
-                                "No Results",
-                                systemImage: "magnifyingglass",
-                                description: Text("No activities match \"\(viewModel.searchText)\"")
-                            )
-                            .frame(minHeight: 400)
-                        } else {
-                            ContentUnavailableView(
-                                "No Activity",
-                                systemImage: "bolt",
-                                description: Text("Your activity feed will appear here")
-                            )
-                            .frame(minHeight: 400)
-                        }
-                    } else {
-                        activityList
-                    }
+            VStack(spacing: 0) {
+                if usesSheetChrome {
+                    sheetHeader
                 }
-                .padding(.bottom, 20)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentOffset.y > 20
-            } action: { _, newValue in
-                isScrolled = newValue
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text("Activity")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .fixedSize()
-                }
-                .sharedBackgroundVisibility(.hidden)
                 
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        ForEach(ActivityTimeRange.allCases, id: \.self) { range in
-                            Button {
-                                viewModel.timeRange = range
-                            } label: {
-                                HStack {
-                                    Text(range.rawValue)
-                                    if viewModel.timeRange == range {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
+                ScrollView {
+                    VStack(spacing: 16) {
+                        if viewModel.groupedActivities.isEmpty {
+                            if let error = viewModel.errorMessage {
+                                ContentUnavailableView(
+                                    "Couldn't Load Activity",
+                                    systemImage: "wifi.exclamationmark",
+                                    description: Text(error)
+                                )
+                                .frame(minHeight: 400)
+                                .foregroundStyle(.white)
+                            } else if !viewModel.searchText.isEmpty {
+                                ContentUnavailableView(
+                                    "No Results",
+                                    systemImage: "magnifyingglass",
+                                    description: Text("No activities match \"\(viewModel.searchText)\"")
+                                )
+                                .frame(minHeight: 400)
+                                .foregroundStyle(.white)
+                            } else {
+                                ContentUnavailableView(
+                                    "No Activity",
+                                    systemImage: "bolt",
+                                    description: Text("Your activity feed will appear here")
+                                )
+                                .frame(minHeight: 400)
+                                .foregroundStyle(.white)
                             }
+                        } else {
+                            activityList
                         }
-                    } label: {
-                        Image(systemName: "calendar")
-                            .font(.caption)
+                    }
+                    .padding(.horizontal, usesSheetChrome ? 16 : 0)
+                    .padding(.top, usesSheetChrome ? 8 : 0)
+                    .padding(.bottom, 20)
+                }
+                .scrollIndicators(usesSheetChrome ? .hidden : .automatic)
+                .scrollDismissesKeyboard(.interactively)
+                .onScrollGeometryChange(for: Bool.self) { geo in
+                    geo.contentOffset.y > 20
+                } action: { _, newValue in
+                    isScrolled = newValue
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    let scrolledFromTop = geometry.contentOffset.y + geometry.contentInsets.top
+                    let threshold: CGFloat = 24
+                    return min(max(scrolledFromTop / threshold, 0), 1)
+                } action: { _, newValue in
+                    activityScrollProgress = newValue
+                }
+                .overlay(alignment: .top) {
+                    activityTopFadeOverlay
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(usesSheetChrome ? Color.homeSectionBackground : Color.clear)
+            .toolbar {
+                if !usesSheetChrome {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Text("Activity")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .fixedSize()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    
+                    ToolbarItem(placement: .topBarTrailing) {
+                        timeRangeMenu
                     }
                 }
             }
@@ -141,6 +158,93 @@ struct ActivityView: View {
         }
     }
     
+    // MARK: - Sheet Header
+    
+    private var sheetHeader: some View {
+        HStack(spacing: 12) {
+            Text("Activity")
+                .font(.largeTitle)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.appText)
+            
+            Spacer()
+            
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 10) {
+                    timeRangeMenu
+                    
+                    Button {
+                        onDismiss?()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 52, height: 52)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 8)
+        .background(Color.homeSectionBackground)
+    }
+    
+    private var timeRangeMenu: some View {
+        Menu {
+            ForEach(ActivityTimeRange.allCases, id: \.self) { range in
+                Button {
+                    viewModel.timeRange = range
+                } label: {
+                    HStack {
+                        Text(range.rawValue)
+                        if viewModel.timeRange == range {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            timeRangeMenuLabel
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Filter Activity")
+    }
+    
+    @ViewBuilder
+    private var activityTopFadeOverlay: some View {
+        if usesSheetChrome {
+            LinearGradient(
+                colors: [
+                    Color.homeSectionBackground,
+                    Color.homeSectionBackground.opacity(0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 28 * activityScrollProgress)
+            .allowsHitTesting(false)
+        }
+    }
+    
+    @ViewBuilder
+    private var timeRangeMenuLabel: some View {
+        if usesSheetChrome {
+            Image(systemName: "calendar")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            Image(systemName: "calendar")
+                .font(.caption)
+                .foregroundStyle(.white)
+        }
+    }
+    
     // MARK: - Activity List
     
     private var activityList: some View {
@@ -150,8 +254,8 @@ struct ActivityView: View {
                     Text(section.title)
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.text.opacity(0.6))
-                        .padding(.horizontal)
+                        .foregroundStyle(Color.appText.opacity(0.6))
+                        .padding(.horizontal, usesSheetChrome ? 0 : 16)
                     
                     sectionCard(activities: section.activities)
                 }
@@ -175,11 +279,11 @@ struct ActivityView: View {
                 }
             }
         }
-        .padding()
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .padding(.horizontal)
+        .background(Color.historyListBackground)
+        .clipShape(RoundedRectangle(cornerRadius: usesSheetChrome ? 24 : 20, style: .continuous))
+        .padding(.horizontal, usesSheetChrome ? 0 : 16)
     }
     
     // MARK: - Navigation

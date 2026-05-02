@@ -20,7 +20,34 @@ struct break_even_iosApp: App {
     @State private var convexService = ConvexService.shared
     
     @State private var notificationManager = NotificationManager.shared
+    @State private var sessionCoordinator = SessionCoordinator()
     @State private var lastForegroundRecoveryAt: Date?
+
+    private enum SessionMaintenanceTrigger {
+        case bootstrap
+        case userChanged
+        case foreground
+
+        var forceTokenRefresh: Bool {
+            switch self {
+            case .bootstrap:
+                return false
+            case .userChanged:
+                return true
+            case .foreground:
+                return false
+            }
+        }
+
+        var restartSubscriptions: Bool {
+            switch self {
+            case .bootstrap, .foreground:
+                return false
+            case .userChanged:
+                return true
+            }
+        }
+    }
     
     var body: some Scene {
         WindowGroup {
@@ -29,49 +56,81 @@ struct break_even_iosApp: App {
                 .environment(\.clerk, clerk)
                 .environment(\.convexService, convexService)
                 .environment(\.notificationManager, notificationManager)
-                .task {
-                    clerk.configure(publishableKey: Configuration.clerkPublishableKey)
-                    try? await clerk.load()
-                    
-                    if clerk.session != nil {
-                        await recoverAuthenticatedSession(reason: "launch", forceTokenRefresh: false)
-                    }
+                .environment(\.sessionCoordinator, sessionCoordinator)
+                .task(id: sessionCoordinator.bootstrapAttempt) {
+                    await bootstrapAuthentication()
                 }
-                .onChange(of: clerk.session) { _, newSession in
+                .onChange(of: clerk.user?.id) { oldUserId, newUserId in
                     Task {
-                        if newSession != nil {
-                            await recoverAuthenticatedSession(reason: "session-changed", forceTokenRefresh: true)
-                        } else {
-                            notificationManager.handleSignedOutLocally()
-                            await convexService.signOut()
-                        }
+                        await handleAuthenticatedUserChange(from: oldUserId, to: newUserId)
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    guard newPhase == .active, clerk.session != nil else { return }
+                    guard newPhase == .active else { return }
                     Task {
-                        await recoverAuthenticatedSession(reason: "scene-active", forceTokenRefresh: true)
+                        await handleSceneDidBecomeActive()
                     }
                 }
         }
     }
     
     @MainActor
-    private func recoverAuthenticatedSession(reason: String, forceTokenRefresh: Bool) async {
+    private func bootstrapAuthentication() async {
+        sessionCoordinator.beginBootstrap()
+        clerk.configure(publishableKey: Configuration.clerkPublishableKey)
+
+        do {
+            try await clerk.load()
+
+            if let clerkId = clerk.user?.id {
+                sessionCoordinator.completeBootstrap(signedIn: true, clerkId: clerkId)
+                await recoverAuthenticatedSession(trigger: .bootstrap)
+            } else {
+                sessionCoordinator.completeBootstrap(signedIn: false)
+            }
+        } catch {
+            sessionCoordinator.failBootstrap(message: error.localizedDescription)
+
+            #if DEBUG
+            print("❌ Failed to bootstrap Clerk session: \(error)")
+            #endif
+        }
+    }
+
+    @MainActor
+    private func handleAuthenticatedUserChange(from oldUserId: String?, to newUserId: String?) async {
+        guard sessionCoordinator.authPhase != .bootstrapping else { return }
+
+        if let clerkId = newUserId {
+            sessionCoordinator.completeBootstrap(signedIn: true, clerkId: clerkId)
+            await recoverAuthenticatedSession(trigger: .userChanged)
+        } else if oldUserId != nil {
+            notificationManager.handleSignedOutLocally()
+            sessionCoordinator.completeBootstrap(signedIn: false)
+            await convexService.signOut()
+        }
+    }
+
+    @MainActor
+    private func handleSceneDidBecomeActive() async {
+        guard sessionCoordinator.authPhase == .signedIn, clerk.user != nil else { return }
+
         if let lastForegroundRecoveryAt,
-           Date().timeIntervalSince(lastForegroundRecoveryAt) < 1.0,
-           reason == "scene-active" {
+           Date().timeIntervalSince(lastForegroundRecoveryAt) < 1.0 {
             return
         }
-        
-        if reason == "scene-active" {
-            lastForegroundRecoveryAt = Date()
-        }
-        
+
+        lastForegroundRecoveryAt = Date()
+        await recoverAuthenticatedSession(trigger: .foreground)
+    }
+
+    @MainActor
+    private func recoverAuthenticatedSession(trigger: SessionMaintenanceTrigger) async {
         do {
             try await convexService.recoverAuthenticatedSession(
                 clerk: clerk,
-                forceTokenRefresh: forceTokenRefresh
+                forceTokenRefresh: trigger.forceTokenRefresh,
+                restartSubscriptions: trigger.restartSubscriptions
             )
             
             if let clerkId = clerk.user?.id {
@@ -79,7 +138,7 @@ struct break_even_iosApp: App {
             }
         } catch {
             #if DEBUG
-            print("❌ Failed to recover authenticated session (\(reason)): \(error)")
+            print("❌ Failed to recover authenticated session (\(trigger)): \(error)")
             #endif
         }
     }

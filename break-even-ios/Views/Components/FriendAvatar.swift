@@ -50,6 +50,18 @@ struct FriendAvatar: View {
     let size: CGFloat
 
     var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            avatarBody
+
+            if friend.isDummy {
+                dummyIndicator
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    @ViewBuilder
+    private var avatarBody: some View {
         if let avatarUrl = friend.avatarUrl, let url = URL(string: avatarUrl) {
             AsyncImage(url: url) { image in
                 image
@@ -85,6 +97,22 @@ struct FriendAvatar: View {
                 .background(circleColor)
                 .clipShape(Circle())
         }
+    }
+
+    /// Small orange dot in the bottom-trailing corner that marks the avatar
+    /// as belonging to a placeholder ("dummy") friend that hasn't been linked
+    /// to a real BreakEven user yet.
+    private var dummyIndicator: some View {
+        let dotSize = max(8, size * 0.28)
+        let stroke = max(1, size * 0.08)
+        return Circle()
+            .fill(Color(hex: "#FFA726"))
+            .frame(width: dotSize, height: dotSize)
+            .overlay(
+                Circle()
+                    .stroke(Color(.systemBackground), lineWidth: stroke)
+            )
+            .accessibilityLabel("Placeholder contact")
     }
 }
 

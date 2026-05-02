@@ -14,6 +14,24 @@ enum SortOrder: String, CaseIterable {
     case oldest = "Oldest First"
     case highestAmount = "Highest Amount"
     case lowestAmount = "Lowest Amount"
+    
+    var menuTitle: String {
+        switch self {
+        case .newest: "Newest"
+        case .oldest: "Oldest"
+        case .highestAmount: "Most Expensive"
+        case .lowestAmount: "Least Expensive"
+        }
+    }
+    
+    var systemImage: String {
+        switch self {
+        case .newest: "clock.arrow.circlepath"
+        case .oldest: "clock"
+        case .highestAmount: "arrow.down.circle"
+        case .lowestAmount: "arrow.up.circle"
+        }
+    }
 }
 
 @MainActor
@@ -29,16 +47,9 @@ class HistoryViewModel {
     
     // Data from Convex
     var transactions: [EnrichedTransaction] = []
-    var currentUser: ConvexUser?
-    
-    // User's default currency (derived from currentUser)
-    var userCurrency: String {
-        currentUser?.defaultCurrency ?? "USD"
-    }
     
     // Subscriptions
     private var transactionsSubscription: Task<Void, Never>?
-    private var userSubscription: Task<Void, Never>?
     
     private func handleSubscriptionFailure(_ context: String, error: Error) {
         self.error = "Couldn't refresh History right now."
@@ -76,38 +87,9 @@ class HistoryViewModel {
         }
     }
     
-    /// Subscribe to current user (for settings like default currency)
-    func subscribeToUser(clerkId: String) {
-        userSubscription?.cancel()
-        
-        userSubscription = Task {
-            let client = ConvexService.shared.client
-            do {
-                let subscription = client.subscribe(
-                    to: "users:getCurrentUser",
-                    with: ["clerkId": clerkId],
-                    yielding: ConvexUser?.self
-                )
-                .values
-                
-                for try await user in subscription {
-                    if Task.isCancelled { break }
-                    self.error = nil
-                    self.currentUser = user
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                if Task.isCancelled { return }
-                handleSubscriptionFailure("users:getCurrentUser", error: error)
-            }
-        }
-    }
-    
     /// Unsubscribe from all subscriptions
     func unsubscribe() {
         transactionsSubscription?.cancel()
-        userSubscription?.cancel()
     }
     
     // MARK: - Filtering & Sorting

@@ -12,10 +12,29 @@ struct FriendSearchOverlay: View {
     let availableFriends: [ConvexFriend]
     @Binding var selectedFriends: [ConvexFriend]
     let selfFriend: ConvexFriend?
+    /// Full friends list (including non-selectable contacts) — used by the
+    /// "Add new friend" sheet to detect "already in your contacts". If empty,
+    /// falls back to `availableFriends`.
+    let allFriends: [ConvexFriend]
     let onDismiss: () -> Void
 
     @State private var searchText = ""
+    @State private var showAddPersonSheet = false
     @FocusState private var isSearchFieldFocused: Bool
+
+    init(
+        availableFriends: [ConvexFriend],
+        selectedFriends: Binding<[ConvexFriend]>,
+        selfFriend: ConvexFriend?,
+        allFriends: [ConvexFriend] = [],
+        onDismiss: @escaping () -> Void
+    ) {
+        self.availableFriends = availableFriends
+        self._selectedFriends = selectedFriends
+        self.selfFriend = selfFriend
+        self.allFriends = allFriends.isEmpty ? availableFriends : allFriends
+        self.onDismiss = onDismiss
+    }
 
     private var unselectedFriends: [ConvexFriend] {
         availableFriends.filter { friend in
@@ -51,6 +70,15 @@ struct FriendSearchOverlay: View {
         .onAppear {
             isSearchFieldFocused = true
         }
+        .sheet(isPresented: $showAddPersonSheet, onDismiss: handleAddPersonDismiss) {
+            AddPersonSheet(
+                existingFriends: allFriends,
+                initialPlaceholderName: searchText
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+            .presentationCompactAdaptation(.sheet)
+        }
     }
 
     // MARK: - Results List
@@ -73,10 +101,66 @@ struct FriendSearchOverlay: View {
                         }
                     }
                 }
+
+                addNewFriendButton
+                    .padding(.top, 16)
             }
             .padding(.bottom, 16)
         }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// Shortcut to spin up `AddPersonSheet` from inside the new-split flow.
+    /// Always visible at the bottom of the list so the user can add a missing
+    /// contact without backing out of the split they're composing.
+    private var addNewFriendButton: some View {
+        Button {
+            isSearchFieldFocused = false
+            showAddPersonSheet = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.12))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(searchText.isEmpty ? "Add new friend" : "Add \"\(searchText)\" as a new friend")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                    Text("Search by username or create a placeholder")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func handleAddPersonDismiss() {
+        // Keep `searchText` as-is: if a placeholder was created with that name
+        // it'll still match the filter and surface immediately. Just refocus
+        // the search field so the user can keep typing.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            isSearchFieldFocused = true
+        }
     }
 
     @ViewBuilder

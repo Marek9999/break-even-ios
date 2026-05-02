@@ -143,6 +143,8 @@ extension Color {
     static let appDestructiveSecondary = Color("DesctructiveSecondary")
     static let appDestructiveText = Color("DestructiveText")
     static let appText = Color("Text")
+    static let homeSectionBackground = Color(red: 10 / 255, green: 10 / 255, blue: 14 / 255)
+    static let historyListBackground = Color.white.opacity(0.04)
     
     // Semantic colors
     static let owedToMe = Color("AccentColor")

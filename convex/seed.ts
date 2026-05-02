@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 // Standard exchange rates snapshot for seed data (rates relative to USD)
@@ -1073,6 +1073,192 @@ export const seedDatabase = mutation({
   },
 });
 
+const RESET_USER_LINKED_DATA_CONFIRMATION = "DELETE_USER_LINKED_DATA";
+
+async function collectResetCounts(ctx: any) {
+  const [
+    users,
+    notificationDevices,
+    friends,
+    exchangeRates,
+    transactions,
+    splits,
+    settlements,
+    invitations,
+    activities,
+    transactionParticipants,
+  ] = await Promise.all([
+    ctx.db.query("users").collect(),
+    ctx.db.query("notificationDevices").collect(),
+    ctx.db.query("friends").collect(),
+    ctx.db.query("exchangeRates").collect(),
+    ctx.db.query("transactions").collect(),
+    ctx.db.query("splits").collect(),
+    ctx.db.query("settlements").collect(),
+    ctx.db.query("invitations").collect(),
+    ctx.db.query("activities").collect(),
+    ctx.db.query("transactionParticipants").collect(),
+  ]);
+
+  return {
+    users: users.length,
+    notificationDevices: notificationDevices.length,
+    friends: friends.length,
+    exchangeRates: exchangeRates.length,
+    transactions: transactions.length,
+    splits: splits.length,
+    settlements: settlements.length,
+    invitations: invitations.length,
+    activities: activities.length,
+    transactionParticipants: transactionParticipants.length,
+    receiptFiles: transactions.filter((transaction) => transaction.receiptFileId).length,
+  };
+}
+
+async function clearUserLinkedTables(ctx: any) {
+  const notificationDevices = await ctx.db.query("notificationDevices").collect();
+  for (const device of notificationDevices) {
+    await ctx.db.delete(device._id);
+  }
+
+  const activities = await ctx.db.query("activities").collect();
+  for (const activity of activities) {
+    await ctx.db.delete(activity._id);
+  }
+
+  const transactionParticipants = await ctx.db.query("transactionParticipants").collect();
+  for (const participant of transactionParticipants) {
+    await ctx.db.delete(participant._id);
+  }
+
+  const invitations = await ctx.db.query("invitations").collect();
+  for (const invitation of invitations) {
+    await ctx.db.delete(invitation._id);
+  }
+
+  const settlements = await ctx.db.query("settlements").collect();
+  for (const settlement of settlements) {
+    await ctx.db.delete(settlement._id);
+  }
+
+  const splits = await ctx.db.query("splits").collect();
+  for (const split of splits) {
+    await ctx.db.delete(split._id);
+  }
+
+  const transactions = await ctx.db.query("transactions").collect();
+  let receiptFilesDeleted = 0;
+  for (const transaction of transactions) {
+    if (transaction.receiptFileId) {
+      try {
+        await ctx.storage.delete(transaction.receiptFileId);
+        receiptFilesDeleted++;
+      } catch {
+        // Ignore missing storage blobs so document cleanup can still complete.
+      }
+    }
+    await ctx.db.delete(transaction._id);
+  }
+
+  const friends = await ctx.db.query("friends").collect();
+  for (const friend of friends) {
+    await ctx.db.delete(friend._id);
+  }
+
+  const exchangeRates = await ctx.db.query("exchangeRates").collect();
+  for (const rate of exchangeRates) {
+    await ctx.db.delete(rate._id);
+  }
+
+  return {
+    notificationDevices: notificationDevices.length,
+    activities: activities.length,
+    transactionParticipants: transactionParticipants.length,
+    invitations: invitations.length,
+    settlements: settlements.length,
+    splits: splits.length,
+    transactions: transactions.length,
+    friends: friends.length,
+    exchangeRates: exchangeRates.length,
+    receiptFiles: receiptFilesDeleted,
+  };
+}
+
+/**
+ * Inspect the current reset state for dev troubleshooting.
+ * Run with: npx convex run seed:getResettableDataCounts
+ */
+export const getResettableDataCounts = query({
+  args: {},
+  handler: async (ctx) => {
+    const counts = await collectResetCounts(ctx);
+    const userLinkedTables = [
+      "notificationDevices",
+      "friends",
+      "exchangeRates",
+      "transactions",
+      "splits",
+      "settlements",
+      "invitations",
+      "activities",
+      "transactionParticipants",
+      "receiptFiles",
+    ] as const;
+
+    const userLinkedRowsRemaining = userLinkedTables.reduce(
+      (total, tableName) => total + counts[tableName],
+      0
+    );
+
+    return {
+      counts,
+      usersPreserved: counts.users,
+      userLinkedRowsRemaining,
+      isClean: userLinkedRowsRemaining === 0,
+    };
+  },
+});
+
+/**
+ * Clear all user-linked data while preserving Clerk-backed Convex users.
+ * Run with: npx convex run seed:clearUserLinkedData '{"confirmText":"DELETE_USER_LINKED_DATA"}'
+ */
+export const clearUserLinkedData = mutation({
+  args: {
+    confirmText: v.string(),
+  },
+  handler: async (ctx, { confirmText }) => {
+    if (confirmText !== RESET_USER_LINKED_DATA_CONFIRMATION) {
+      throw new Error(
+        `Reset cancelled. Pass confirmText: "${RESET_USER_LINKED_DATA_CONFIRMATION}" to proceed.`
+      );
+    }
+
+    const before = await collectResetCounts(ctx);
+    const deleted = await clearUserLinkedTables(ctx);
+    const after = await collectResetCounts(ctx);
+
+    return {
+      message: "User-linked data cleared successfully. Convex users were preserved.",
+      deleted,
+      before,
+      after,
+      usersPreserved: after.users,
+      isClean:
+        after.notificationDevices === 0 &&
+        after.friends === 0 &&
+        after.exchangeRates === 0 &&
+        after.transactions === 0 &&
+        after.splits === 0 &&
+        after.settlements === 0 &&
+        after.invitations === 0 &&
+        after.activities === 0 &&
+        after.transactionParticipants === 0 &&
+        after.receiptFiles === 0,
+    };
+  },
+});
+
 /**
  * Clear all data from the database.
  * Run with: npx convex run seed:clearDatabase
@@ -1087,53 +1273,18 @@ export const clearDatabase = mutation({
       return { message: "Deletion cancelled. Pass confirmDelete: true to proceed." };
     }
 
-    // Delete in reverse order of dependencies
-    const invitations = await ctx.db.query("invitations").collect();
-    for (const inv of invitations) {
-      await ctx.db.delete(inv._id);
-    }
-
-    const settlements = await ctx.db.query("settlements").collect();
-    for (const settlement of settlements) {
-      await ctx.db.delete(settlement._id);
-    }
-
-    const splits = await ctx.db.query("splits").collect();
-    for (const split of splits) {
-      await ctx.db.delete(split._id);
-    }
-
-    const transactions = await ctx.db.query("transactions").collect();
-    for (const tx of transactions) {
-      await ctx.db.delete(tx._id);
-    }
-
-    const friends = await ctx.db.query("friends").collect();
-    for (const friend of friends) {
-      await ctx.db.delete(friend._id);
-    }
+    const deleted = await clearUserLinkedTables(ctx);
 
     const users = await ctx.db.query("users").collect();
     for (const user of users) {
       await ctx.db.delete(user._id);
     }
 
-    // Also clear exchange rates cache
-    const exchangeRates = await ctx.db.query("exchangeRates").collect();
-    for (const rate of exchangeRates) {
-      await ctx.db.delete(rate._id);
-    }
-
     return {
       message: "Database cleared successfully!",
       deleted: {
         users: users.length,
-        friends: friends.length,
-        transactions: transactions.length,
-        splits: splits.length,
-        settlements: settlements.length,
-        invitations: invitations.length,
-        exchangeRates: exchangeRates.length,
+        ...deleted,
       },
     };
   },

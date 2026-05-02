@@ -753,11 +753,9 @@ struct EmojiPickerSheet: View {
                     if newValue.isEmpty {
                         searchResults = []
                     } else {
-                        Task.detached(priority: .userInitiated) {
+                        Task(priority: .userInitiated) {
                             let results = EmojiStore.search(newValue)
-                            await MainActor.run {
-                                searchResults = results
-                            }
+                            searchResults = results
                         }
                     }
                 }

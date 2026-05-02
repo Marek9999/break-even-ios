@@ -45,13 +45,11 @@ class ProfileViewModel {
     
     // Data from Convex
     var friends: [ConvexFriend] = []
-    var currentUser: ConvexUser?
     var sentInvitations: [EnrichedInvitation] = []
     var receivedInvitations: [ReceivedInvitation] = []
     
     // Subscriptions
     private var friendsSubscription: Task<Void, Never>?
-    private var userSubscription: Task<Void, Never>?
     private var invitationsSubscription: Task<Void, Never>?
     private var receivedInvitationsSubscription: Task<Void, Never>?
     
@@ -87,34 +85,6 @@ class ProfileViewModel {
             } catch {
                 if Task.isCancelled { return }
                 handleSubscriptionFailure("friends:listFriends", error: error)
-            }
-        }
-    }
-    
-    /// Subscribe to current user
-    func subscribeToUser(clerkId: String) {
-        userSubscription?.cancel()
-        
-        userSubscription = Task {
-            let client = ConvexService.shared.client
-            do {
-                let subscription = client.subscribe(
-                    to: "users:getCurrentUser",
-                    with: ["clerkId": clerkId],
-                    yielding: ConvexUser?.self
-                )
-                .values
-                
-                for try await user in subscription {
-                    if Task.isCancelled { break }
-                    self.error = nil
-                    self.currentUser = user
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                if Task.isCancelled { return }
-                handleSubscriptionFailure("users:getCurrentUser", error: error)
             }
         }
     }
@@ -178,7 +148,6 @@ class ProfileViewModel {
     /// Unsubscribe from all subscriptions
     func unsubscribe() {
         friendsSubscription?.cancel()
-        userSubscription?.cancel()
         invitationsSubscription?.cancel()
         receivedInvitationsSubscription?.cancel()
     }

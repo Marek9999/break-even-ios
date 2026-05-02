@@ -551,6 +551,41 @@ struct ResendInvitationResponse: Codable {
     let token: String
 }
 
+// MARK: - Send Invitation To User Response
+
+/// Response from `invitations:sendInvitationToUser` — used when inviting a real
+/// user discovered via username search. `friendId` is the caller's local
+/// `friends` row pointing at the target user.
+struct SendInvitationToUserResponse: Codable {
+    let friendId: String
+    let invitationId: String
+    let token: String
+    let isExisting: Bool
+    let autoAccepted: Bool
+}
+
+// MARK: - Link Placeholder Response
+
+/// Response from `friends:linkPlaceholderToUser`. When the caller already has a
+/// different friend row linked to the target user, `conflict == "already_linked"`
+/// and `existingFriendId` points at that other row so the UI can offer to open
+/// the existing contact instead of creating a duplicate.
+struct LinkPlaceholderResponse: Codable {
+    let conflict: String?
+    let existingFriendId: String?
+    let friendId: String
+    let invitationId: String?
+    let token: String?
+    let autoAccepted: Bool
+}
+
+// MARK: - Merge Placeholder Response
+
+struct MergePlaceholderResponse: Codable {
+    let success: Bool
+    let friendId: String
+}
+
 // MARK: - Username
 
 /// Response from setUsername mutation

@@ -99,7 +99,34 @@ struct EdgeCurveLabView: View {
     }
 
     private var curvePreview: some View {
-        ZStack {
+        let currentLineY = lineY
+        let currentProgress = progress
+        let currentStretchAmount = stretchAmount
+        let currentStretchFalloff = stretchFalloff
+        let currentLineWidth = lineWidth
+        let currentEdgeHeight = edgeHeight
+        let currentEdgeSharpness = edgeSharpness
+        let currentMeltTop = meltTop
+        let currentMeltBottom = meltBottom
+        let currentMeltStartTop = meltStartTop
+        let currentMeltStartBottom = meltStartBottom
+        let currentBlurCenter = blurCenter
+        let currentBlurEdge = blurEdge
+        let currentBlurCurve = blurCurve
+        let currentMotionBlur = motionBlur
+        let currentChromaAmount = chromaAmount
+        let currentOpacityCenter = opacityCenter
+        let currentOpacityEdge = opacityEdge
+        let currentBlendMode = selectedBlendMode.mode
+        let resolvedLineColor = lineColor.resolve(in: EnvironmentValues())
+        let rgb = SIMD4<Float>(
+            resolvedLineColor.linearRed,
+            resolvedLineColor.linearGreen,
+            resolvedLineColor.linearBlue,
+            1.0
+        )
+
+        return ZStack {
             Group {
                 if let backgroundImage {
                     GeometryReader { geo in
@@ -117,55 +144,48 @@ struct EdgeCurveLabView: View {
                 effect.distortionEffect(
                     ShaderLibrary.bgStretch(
                         .float2(proxy.size),
-                        .float(lineY),
-                        .float(progress),
-                        .float(stretchAmount),
-                        .float(stretchFalloff),
+                        .float(currentLineY),
+                        .float(currentProgress),
+                        .float(currentStretchAmount),
+                        .float(currentStretchFalloff),
                         .float(topY),
                         .float(bottomY)
                     ),
                     maxSampleOffset: CGSize(
                         width: 0,
-                        height: stretchAmount * proxy.size.height
+                        height: currentStretchAmount * proxy.size.height
                     )
                 )
             }
 
             Color.white
                 .visualEffect { effect, proxy in
-                    let resolved = lineColor.resolve(in: EnvironmentValues())
-                    let rgb = SIMD4<Float>(
-                        resolved.linearRed,
-                        resolved.linearGreen,
-                        resolved.linearBlue,
-                        1.0
-                    )
                     return effect.colorEffect(
                         ShaderLibrary.edgeCurve(
                             .float2(proxy.size),
-                            .float(lineWidth),
-                            .float(edgeHeight),
-                            .float(edgeSharpness),
-                            .float(meltTop),
-                            .float(meltBottom),
-                            .float(meltStartTop),
-                            .float(meltStartBottom),
-                            .float(progress),
-                            .float(lineY),
-                            .float(blurCenter),
-                            .float(blurEdge),
-                            .float(blurCurve),
-                            .float(motionBlur),
+                            .float(currentLineWidth),
+                            .float(currentEdgeHeight),
+                            .float(currentEdgeSharpness),
+                            .float(currentMeltTop),
+                            .float(currentMeltBottom),
+                            .float(currentMeltStartTop),
+                            .float(currentMeltStartBottom),
+                            .float(currentProgress),
+                            .float(currentLineY),
+                            .float(currentBlurCenter),
+                            .float(currentBlurEdge),
+                            .float(currentBlurCurve),
+                            .float(currentMotionBlur),
                             .float(topY),
                             .float(bottomY),
-                            .float(chromaAmount),
+                            .float(currentChromaAmount),
                             .float4(rgb.x, rgb.y, rgb.z, rgb.w),
-                            .float(opacityCenter),
-                            .float(opacityEdge)
+                            .float(currentOpacityCenter),
+                            .float(currentOpacityEdge)
                         )
                     )
                 }
-                .blendMode(selectedBlendMode.mode)
+                .blendMode(currentBlendMode)
         }
     }
 

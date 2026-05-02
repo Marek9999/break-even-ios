@@ -349,6 +349,11 @@ struct PersonDetailSheet: View {
                 }
             }
         }
+        .background {
+            Color.homeSectionBackground
+                .opacity(selectedDetent == .large ? 1 : 0)
+                .ignoresSafeArea()
+        }
         .presentationDetents(detentsLocked ? [.large] : [.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.visible)
         .onChange(of: showSplitDetail) { _, isShowing in
@@ -501,7 +506,7 @@ struct PersonDetailSheet: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.accentSecondary.opacity(0.2))
+        .background(Color.historyListBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
@@ -1406,7 +1411,7 @@ private struct PersonDetailSheetPreviewContent: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.accentSecondary.opacity(0.2))
+        .background(Color.historyListBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     

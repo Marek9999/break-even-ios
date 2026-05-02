@@ -7,6 +7,7 @@ import CoreHaptics
 /// Only the "Analyzing" text uses .difference so it stays visible on any background.
 struct EdgeCurveOverlay: ViewModifier {
     let isActive: Bool
+    let showLabel: Bool
 
     private let lineWidth: Double = 0.0231
     private let edgeHeight: Double = 0.086
@@ -53,6 +54,18 @@ struct EdgeCurveOverlay: ViewModifier {
     }
 
     func body(content: Content) -> some View {
+        let currentLineY = lineY
+        let currentProgress = progress
+        let currentStretchAmount = stretchAmount
+        let currentStretchFalloff = stretchFalloff
+        let resolvedLineColor = lineColor.resolve(in: EnvironmentValues())
+        let rgb = SIMD4<Float>(
+            resolvedLineColor.linearRed,
+            resolvedLineColor.linearGreen,
+            resolvedLineColor.linearBlue,
+            1.0
+        )
+
         if isActive {
             ZStack {
                 content
@@ -60,29 +73,22 @@ struct EdgeCurveOverlay: ViewModifier {
                         effect.distortionEffect(
                             ShaderLibrary.bgStretch(
                                 .float2(proxy.size),
-                                .float(lineY),
-                                .float(progress),
-                                .float(stretchAmount),
-                                .float(stretchFalloff),
+                                .float(currentLineY),
+                                .float(currentProgress),
+                                .float(currentStretchAmount),
+                                .float(currentStretchFalloff),
                                 .float(topY),
                                 .float(bottomY)
                             ),
                             maxSampleOffset: CGSize(
                                 width: 0,
-                                height: stretchAmount * proxy.size.height
+                                height: currentStretchAmount * proxy.size.height
                             )
                         )
                     }
 
                 Color.white
                     .visualEffect { effect, proxy in
-                        let resolved = lineColor.resolve(in: EnvironmentValues())
-                        let rgb = SIMD4<Float>(
-                            resolved.linearRed,
-                            resolved.linearGreen,
-                            resolved.linearBlue,
-                            1.0
-                        )
                         return effect.colorEffect(
                             ShaderLibrary.edgeCurve(
                                 .float2(proxy.size),
@@ -93,8 +99,8 @@ struct EdgeCurveOverlay: ViewModifier {
                                 .float(meltBottom),
                                 .float(meltStartTop),
                                 .float(meltStartBottom),
-                                .float(progress),
-                                .float(lineY),
+                                .float(currentProgress),
+                                .float(currentLineY),
                                 .float(blurCenter),
                                 .float(blurEdge),
                                 .float(blurCurve),
@@ -110,10 +116,12 @@ struct EdgeCurveOverlay: ViewModifier {
                     }
                     .blendMode(.softLight)
 
-                Text("Analyzing")
-                    .font(.title2.weight(.semibold))
-                    .blendMode(.difference)
-                    .allowsHitTesting(false)
+                if showLabel {
+                    Text("Analyzing")
+                        .font(.title2.weight(.semibold))
+                        .blendMode(.difference)
+                        .allowsHitTesting(false)
+                }
             }
             .onAppear { startCycle() }
             .onDisappear { stopCycle() }
@@ -271,7 +279,7 @@ private final class EdgeCurveHapticState {
 }
 
 extension View {
-    func edgeCurveOverlay(isActive: Bool) -> some View {
-        modifier(EdgeCurveOverlay(isActive: isActive))
+    func edgeCurveOverlay(isActive: Bool, showLabel: Bool = true) -> some View {
+        modifier(EdgeCurveOverlay(isActive: isActive, showLabel: showLabel))
     }
 }

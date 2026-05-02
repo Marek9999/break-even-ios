@@ -1,654 +1,530 @@
 import SwiftUI
 import Clerk
 import ConvexMobile
+import UIKit
 internal import Combine
 
+/// Add Friend sheet — dark, custom-laid-out flow with a username search at the
+/// top and an always-visible "Create a dummy friend" section below an "or"
+/// divider. Visual language mirrors the inline New Split flow: 23pt semibold
+/// title + a 52pt glass circle dismiss in the header, capsule pill inputs, a
+/// fixed-circle emoji carousel, and the project-standard white glass capsule
+/// CTA at the bottom.
 struct AddPersonSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
-    
-    enum Step {
-        case searchAndCreate
-        case inviteOptions
+
+    let existingFriends: [ConvexFriend]
+    let initialPlaceholderName: String
+
+    init(
+        existingFriends: [ConvexFriend] = [],
+        initialPlaceholderName: String = ""
+    ) {
+        self.existingFriends = existingFriends
+        self.initialPlaceholderName = initialPlaceholderName
     }
-    
-    enum InviteMethod: String, CaseIterable {
-        case username = "Username"
-        case email = "Email"
-    }
-    
+
     enum SearchState: Equatable {
         case idle
         case searching
         case found(PublicUserProfile)
+        case alreadyInContacts(ConvexFriend, PublicUserProfile)
         case notFound
-        
+
         static func == (lhs: SearchState, rhs: SearchState) -> Bool {
             switch (lhs, rhs) {
             case (.idle, .idle), (.searching, .searching), (.notFound, .notFound):
                 return true
             case (.found(let a), .found(let b)):
                 return a.id == b.id
+            case (.alreadyInContacts(let a, _), .alreadyInContacts(let b, _)):
+                return a.id == b.id
             default:
                 return false
             }
         }
     }
-    
-    enum EmailLookupState: Equatable {
-        case idle
-        case checking
-        case onApp(userName: String?)
-        case offApp
-    }
-    
-    @State private var step: Step = .searchAndCreate
-    @State private var inviteMethod: InviteMethod = .username
-    @State private var inviteInput = ""
+
+    @State private var username = ""
     @State private var searchState: SearchState = .idle
-    @State private var emailLookupState: EmailLookupState = .idle
     @State private var searchTask: Task<Void, Never>?
-    
-    // Dummy user fields
-    @State private var name = ""
-    @State private var avatarEmoji = ""
-    @State private var avatarColorHex: String? = nil
-    
-    // Loading / error
-    @State private var isLoading = false
+
+    @State private var placeholderName = ""
+    @State private var placeholderEmoji: String = "🐼"
+    @State private var placeholderHue: Double = 0.571
+
+    @State private var isSendingInvite = false
+    @State private var isCreatingPlaceholder = false
     @State private var error: String?
-    
-    // Result from createDummyFriend
-    @State private var createdFriendId: String?
-    @State private var userExistsOnApp = false
-    
-    // Invitation state
-    @State private var inviteToken: String?
-    @State private var copiedLink = false
-    
+    @State private var sentForUserId: String?
+
     @FocusState private var focusedField: Field?
-    
-    enum Field {
-        case search, name
+    enum Field { case username, placeholderName }
+
+    private let baseEmojis: [String] = [
+        "🦁", "🐧", "🐼", "🐔", "🐮", "🐶", "🐱", "🐭", "🐹", "🐰",
+        "🦊", "🐻", "🐨", "🐯", "🐷", "🐸", "🐵", "🦆", "🦉", "🐺"
+    ]
+
+    private var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    private var trimmedPlaceholderName: String {
+        placeholderName.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var selectedColor: Color {
+        Color(hue: placeholderHue, saturation: 0.72, brightness: 0.96)
     }
     
-    private var trimmedInput: String {
-        inviteInput.trimmingCharacters(in: .whitespaces).lowercased()
+    private var selectedColorHex: String {
+        UIColor(hue: placeholderHue, saturation: 0.72, brightness: 0.96, alpha: 1).hexString
     }
     
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespaces)
-    }
-    
-    private var showDummyUserForm: Bool {
-        switch inviteMethod {
-        case .username:
-            switch searchState {
-            case .notFound:
-                return true
-            case .idle:
-                return false
-            default:
-                return false
-            }
-        case .email:
-            switch emailLookupState {
-            case .onApp:
-                return false
-            case .idle, .checking, .offApp:
-                return true
-            }
-        }
-    }
-    
-    private var canProceed: Bool {
-        switch inviteMethod {
-        case .username:
-            switch searchState {
-            case .found:
-                return true
-            default:
-                return !trimmedName.isEmpty
-            }
-        case .email:
-            switch emailLookupState {
-            case .onApp:
-                return isValidEmail(trimmedInput)
-            case .idle, .checking, .offApp:
-                return isValidEmail(trimmedInput) && !trimmedName.isEmpty
-            }
-        }
-    }
-    
-    private var displayName: String {
-        if case .found(let profile) = searchState {
-            return profile.name
-        }
-        if case .onApp(let userName) = emailLookupState, let userName, !userName.isEmpty {
-            return userName
-        }
-        return trimmedName.isEmpty ? "Friend" : trimmedName
-    }
-    
-    private var nextButtonTitle: String {
-        if case .found = searchState {
-            return "Add & Invite"
-        }
-        if case .onApp = emailLookupState {
-            return "Add & Invite"
-        }
-        return "Create"
-    }
-    
-    // MARK: - Body
-    
+    private let sheetBackground = Color(red: 14 / 255, green: 14 / 255, blue: 21 / 255)
+
     var body: some View {
-        NavigationStack {
-            Group {
-                switch step {
-                case .searchAndCreate:
-                    searchAndCreateForm
-                case .inviteOptions:
-                    inviteOptionsView
-                }
-            }
-            .navigationTitle(step == .searchAndCreate ? "Add Person" : "Invite \(displayName)")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(step == .inviteOptions ? "Done" : "Cancel") {
-                        dismiss()
-                    }
-                    .disabled(isLoading)
-                }
-                
-                if step == .searchAndCreate {
-                    ToolbarItem(placement: .confirmationAction) {
-                        if isLoading {
-                            ProgressView()
-                        } else {
-                            Button(nextButtonTitle) {
-                                createPerson()
-                            }
-                            .fontWeight(.semibold)
-                            .disabled(!canProceed)
-                        }
+        ZStack {
+            sheetBackground.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    searchBlock
+                    dividerRow
+                    dummyBlock
+                    addDummyButton
+
+                    if let error {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 32)
             }
-            .onAppear {
-                focusedField = .search
-            }
-            .interactiveDismissDisabled(isLoading)
-        }
-    }
-    
-    // MARK: - Step 1: Search & Create
-    
-    private var searchAndCreateForm: some View {
-        Form {
-            searchSection
-            
-            if case .found(let profile) = searchState {
-                matchedUserSection(profile)
-            }
-            
-            if case .onApp(let userName) = emailLookupState {
-                emailLookupSection(userName: userName)
-            }
-            
-            if searchState == .notFound {
-                notFoundBanner
-            }
-            
-            if showDummyUserForm {
-                dummyUserDetailsSection
-                avatarCustomizerSection
-            }
-            
-            if let error {
-                Section {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                headerRow
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .background(sheetBackground)
             }
         }
-    }
-    
-    // MARK: - Search Section
-    
-    private var searchSection: some View {
-        Section {
-            Picker("Search by", selection: $inviteMethod) {
-                ForEach(InviteMethod.allCases, id: \.self) { method in
-                    Text(method.rawValue).tag(method)
-                }
-            }
-            .pickerStyle(.segmented)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            .onChange(of: inviteMethod) { _, _ in
-                inviteInput = ""
-                searchState = .idle
-                emailLookupState = .idle
-                error = nil
-                searchTask?.cancel()
-            }
-            
-            switch inviteMethod {
-            case .username:
-                usernameInputRow
-            case .email:
-                emailInputRow
-            }
-        } header: {
-            Text("Find on BreakEven")
-        } footer: {
-            switch inviteMethod {
-            case .username:
-                Text("Search for their BreakEven username to add them directly.")
-            case .email:
-                Text("Enter their email to see whether they already use BreakEven. If they do, they can accept in app. If not, you can still invite them by email.")
+        .interactiveDismissDisabled(isSendingInvite || isCreatingPlaceholder)
+        .onAppear {
+            if !initialPlaceholderName.isEmpty && placeholderName.isEmpty {
+                placeholderName = initialPlaceholderName
+                focusedField = .placeholderName
+            } else {
+                focusedField = .username
             }
         }
+        .onDisappear {
+            searchTask?.cancel()
+            searchTask = nil
+        }
     }
-    
-    private var usernameInputRow: some View {
-        HStack(spacing: 4) {
-            Text("@")
-                .foregroundStyle(.secondary)
-                .font(.body.monospaced())
-            
-            TextField("username", text: $inviteInput)
-                .focused($focusedField, equals: .search)
+
+    // MARK: - Header
+    //
+    // Mirrors `HomeView.sharedHeader` / `headerActionsArea` for the inline
+    // new-split flow: 23pt semibold app-text title on the left, a 52pt glass
+    // circle xmark on the right.
+
+    private var headerRow: some View {
+        HStack(alignment: .center) {
+            Text("Add Friend")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(Color.appText)
+
+            Spacer(minLength: 12)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(Color.appText)
+                    .frame(width: 52, height: 52)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .disabled(isSendingInvite || isCreatingPlaceholder)
+        }
+    }
+
+    // MARK: - Search
+
+    private var searchBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Search friend by username to invite")
+                .font(.subheadline)
+                .foregroundStyle(Color.appText.opacity(0.58))
+
+            HStack(spacing: 6) {
+                Text("@")
+                    .foregroundStyle(Color.appText.opacity(0.45))
+
+                TextField(
+                    "",
+                    text: $username,
+                    prompt: Text("username").foregroundStyle(Color.appText.opacity(0.32))
+                )
+                .focused($focusedField, equals: .username)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
-                .font(.body.monospaced())
-                .onChange(of: inviteInput) { _, newValue in
-                    inviteInput = newValue.lowercased().filter {
+                .foregroundStyle(Color.appText)
+                .onChange(of: username) { _, newValue in
+                    username = newValue.lowercased().filter {
                         $0.isLetter || $0.isNumber || $0 == "_"
                     }
-                    if inviteInput.count > 20 {
-                        inviteInput = String(inviteInput.prefix(20))
+                    if username.count > 20 {
+                        username = String(username.prefix(20))
                     }
                     error = nil
                     debounceUsernameSearch()
                 }
-            
-            searchStateIndicator
+
+                searchStateIndicator
+            }
+            .font(.body)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(.white.opacity(0.05))
+            .clipShape(Capsule())
+
+            inlineSearchResult
         }
     }
-    
+
     @ViewBuilder
     private var searchStateIndicator: some View {
         switch searchState {
         case .searching:
-            ProgressView()
-                .controlSize(.small)
+            ProgressView().controlSize(.small)
         case .found:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
+        case .alreadyInContacts:
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .foregroundStyle(.blue)
         case .notFound:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.orange)
         case .idle:
-            if !trimmedInput.isEmpty && trimmedInput.count >= 3 {
+            if !trimmedUsername.isEmpty {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appText.opacity(0.45))
             }
         }
     }
-    
+
     @ViewBuilder
-    private var emailLookupIndicator: some View {
-        switch emailLookupState {
-        case .checking:
-            ProgressView()
-                .controlSize(.small)
-        case .onApp:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .offApp:
-            if isValidEmail(trimmedInput) {
-                Image(systemName: "person.badge.plus")
-                    .foregroundStyle(.secondary)
-            }
-        case .idle:
-            if isValidEmail(trimmedInput) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-            }
+    private var inlineSearchResult: some View {
+        switch searchState {
+        case .found(let profile):
+            foundUserCard(profile)
+        case .alreadyInContacts(let friend, _):
+            alreadyInContactsCard(friend: friend)
+        case .notFound:
+            notFoundCard
+        case .idle, .searching:
+            EmptyView()
         }
     }
-    
-    private var emailInputRow: some View {
-        HStack(spacing: 8) {
-            TextField("Email", text: $inviteInput)
-                .focused($focusedField, equals: .search)
-                .textContentType(.emailAddress)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
-                .disableAutocorrection(true)
-                .onChange(of: inviteInput) { _, newValue in
-                    inviteInput = newValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    error = nil
-                    debounceEmailLookup()
-                }
-            
-            emailLookupIndicator
-        }
-    }
-    
-    // MARK: - Matched User Section
-    
-    private func matchedUserSection(_ profile: PublicUserProfile) -> some View {
-        Section {
+
+    private func foundUserCard(_ profile: PublicUserProfile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                if let avatarUrl = profile.avatarUrl, let url = URL(string: avatarUrl) {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        initialsCircle(for: profile.name, size: 44)
-                    }
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                } else {
-                    initialsCircle(for: profile.name, size: 44)
-                }
-                
+                profileAvatar(for: profile)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.name)
                         .font(.body.weight(.medium))
-                    if let username = profile.displayUsername {
-                        Text(username)
+                        .foregroundStyle(Color.appText)
+                    if let display = profile.displayUsername {
+                        Text(display)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appText.opacity(0.58))
                     }
                 }
-                
+
                 Spacer()
-                
-                Image(systemName: "person.crop.circle.badge.checkmark")
-                    .font(.title3)
-                    .foregroundStyle(.green)
-            }
-            .padding(.vertical, 4)
-        } header: {
-            Text("User Found")
-        }
-    }
-    
-    private func emailLookupSection(userName: String?) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Already on BreakEven", systemImage: "checkmark.seal.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.green)
-                
-                Text("\(userName ?? trimmedInput) already has an account. We'll connect them and send an in-app invite.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
-        }
-    }
-    
-    // MARK: - Not Found Banner
-    
-    private var notFoundBanner: some View {
-        Section {
-            Label {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No user found with that username")
-                        .font(.subheadline.weight(.medium))
-                    Text("You can still create them as a contact and invite them later.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } icon: {
-                Image(systemName: "person.crop.circle.badge.questionmark")
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-    
-    // MARK: - Dummy User Details
-    
-    private var dummyUserDetailsSection: some View {
-        Section {
-            TextField("Name", text: $name)
-                .focused($focusedField, equals: .name)
-                .textContentType(.name)
-                .submitLabel(.done)
-        } header: {
-            Text("Contact Details")
-        }
-    }
-    
-    // MARK: - Avatar Customizer
-    
-    private var avatarCustomizerSection: some View {
-        Section {
-            VStack(spacing: 16) {
-                avatarPreview
-                emojiPickerRow
-                colorPaletteRow
             }
             .padding(.vertical, 8)
-        } header: {
-            Text("Avatar")
-        } footer: {
-            Text("Customize how this person appears in your splits.")
-        }
-    }
-    
-    private var avatarPreview: some View {
-        let bgColor = AvatarColors.color(forHex: avatarColorHex)
-        
-        return ZStack {
-            if !avatarEmoji.isEmpty {
-                Text(avatarEmoji)
-                    .font(.system(size: 36))
-            } else {
-                Text(previewInitials)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-        }
-        .frame(width: 80, height: 80)
-        .background(bgColor)
-        .clipShape(Circle())
-        .animation(.smooth(duration: 0.2), value: avatarEmoji)
-        .animation(.smooth(duration: 0.2), value: avatarColorHex)
-        .frame(maxWidth: .infinity)
-    }
-    
-    private var previewInitials: String {
-        let text = trimmedName
-        guard !text.isEmpty else { return "?" }
-        let components = text.split(separator: " ")
-        if components.count >= 2 {
-            return "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()
-        }
-        return String(text.prefix(2)).uppercased()
-    }
-    
-    private var emojiPickerRow: some View {
-        HStack {
-            Text("Emoji")
-                .foregroundStyle(.secondary)
-            
-            Spacer()
-            
-            EmojiTextField(
-                text: $avatarEmoji,
-                placeholder: "None",
-                size: 40
-            )
-            
-            if !avatarEmoji.isEmpty {
-                Button {
-                    avatarEmoji = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-    
-    private var colorPaletteRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Color")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: 10) {
-                colorSwatch(hex: nil, color: .accentColor, label: "Default")
-                
-                ForEach(AvatarColors.palette, id: \.hex) { item in
-                    colorSwatch(hex: item.hex, color: item.color, label: item.name)
-                }
-            }
-        }
-    }
-    
-    private func colorSwatch(hex: String?, color: Color, label: String) -> some View {
-        let isSelected = avatarColorHex == hex
-        return Button {
-            withAnimation(.smooth(duration: 0.2)) {
-                avatarColorHex = hex
-            }
-        } label: {
-            Circle()
-                .fill(color)
-                .frame(width: 28, height: 28)
-                .overlay {
-                    if isSelected {
-                        Circle()
-                            .strokeBorder(.white, lineWidth: 2)
-                        Circle()
-                            .strokeBorder(color, lineWidth: 1)
-                            .padding(2)
+
+            Button {
+                sendInvitationToUser(profile)
+            } label: {
+                HStack(spacing: 10) {
+                    if isSendingInvite {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.black)
+                    } else {
+                        Image(systemName: sentForUserId == profile._id
+                              ? "checkmark"
+                              : "paperplane.fill")
+                            .font(.system(size: 14, weight: .semibold))
                     }
+                    Text(isSendingInvite
+                         ? "Sending..."
+                         : (sentForUserId == profile._id ? "Invite sent" : "Send Invite"))
+                        .font(.system(size: 17, weight: .medium))
                 }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .glassEffect(.clear.tint(.white.opacity(0.9)).interactive(), in: .capsule)
+                .opacity((isSendingInvite || sentForUserId == profile._id) ? 0.7 : 1)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSendingInvite || sentForUserId == profile._id)
+        }
+    }
+
+    private func alreadyInContactsCard(friend: ConvexFriend) -> some View {
+        HStack(spacing: 12) {
+            FriendAvatar(friend: friend, size: 44)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(friend.name)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.appText)
+                Text(statusDescription(for: friend))
+                    .font(.caption)
+                    .foregroundStyle(Color.appText.opacity(0.58))
+            }
+
+            Spacer()
+        }
+    }
+
+    private var notFoundCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .frame(width: 32, height: 32)
+
+                Text("No users found with this username, invite them to BreakEven or create a dummy user")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.appText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ShareLink(item: shareURL, message: Text(shareMessage)) {
+                Text("Invite to BreakEven")
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .foregroundStyle(Color.appText)
+            }
+            .buttonStyle(.glass)
+        }
+    }
+
+    // MARK: - Divider
+
+    private var dividerRow: some View {
+        HStack(spacing: 12) {
+            Rectangle()
+                .fill(Color.appText.opacity(0.12))
+                .frame(height: 1)
+            Text("or")
+                .font(.subheadline)
+                .foregroundStyle(Color.appText.opacity(0.58))
+            Rectangle()
+                .fill(Color.appText.opacity(0.12))
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - Dummy block
+
+    private var dummyBlock: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Create a dummy friend")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.appText)
+                Text("and you can link them with your friend later when they join BreakEven")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.appText.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            EmojiCarousel(
+                baseEmojis: baseEmojis,
+                selectedColor: selectedColor,
+                selectedEmoji: $placeholderEmoji
+            )
+            .frame(height: 76)
+
+            hueSlider
+
+            TextField(
+                "",
+                text: $placeholderName,
+                prompt: Text("dummy username").foregroundStyle(Color.appText.opacity(0.32))
+            )
+            .focused($focusedField, equals: .placeholderName)
+            .textContentType(.name)
+            .submitLabel(.done)
+            .foregroundStyle(Color.appText)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(.white.opacity(0.05))
+            .clipShape(Capsule())
+        }
+    }
+
+    private var hueSlider: some View {
+        HueSlider(value: $placeholderHue)
+    }
+
+    // MARK: - Add Dummy Friend
+    //
+    // Matches the project's primary CTA pattern (e.g. `HomeView.centerActionSection`
+    // "New Split" and `InlineNewSplitFlow.bottomActionBar` "Add Split"):
+    // a white glass capsule with leading SF symbol + label.
+
+    private var addDummyButton: some View {
+        let canSubmit = !trimmedPlaceholderName.isEmpty && !isCreatingPlaceholder
+        return Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            createPlaceholder()
+        } label: {
+            HStack(spacing: 8) {
+                if isCreatingPlaceholder {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.black)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Add Dummy Friend")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.black)
+            .padding(.horizontal, 26)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .clipShape(Capsule())
+            .glassEffect(.clear.tint(.white.opacity( canSubmit ? 0.9 : 0.4)).interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .disabled(!canSubmit)
     }
-    
-    private func initialsCircle(for name: String, size: CGFloat) -> some View {
-        let components = name.split(separator: " ")
-        let initials: String
-        if components.count >= 2 {
-            initials = "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()
-        } else {
-            initials = String(name.prefix(2)).uppercased()
+
+    // MARK: - Helpers
+
+    private func profileAvatar(for profile: PublicUserProfile) -> some View {
+        Group {
+            if let avatarUrl = profile.avatarUrl, let url = URL(string: avatarUrl) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    initialsCircle(for: profile.name)
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+            } else {
+                initialsCircle(for: profile.name)
+            }
         }
-        return Text(initials)
-            .font(.system(size: size * 0.38, weight: .semibold))
+    }
+
+    private func initialsCircle(for name: String) -> some View {
+        Text(previewInitials(for: name))
+            .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: size, height: size)
+            .frame(width: 44, height: 44)
             .background(Color.accentColor)
             .clipShape(Circle())
     }
-    
-    // MARK: - Step 2: Invite Options
-    
-    private var inviteOptionsView: some View {
-        List {
-            if userExistsOnApp {
-                Section {
-                    Label {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(displayName) is already on BreakEven")
-                                .font(.subheadline.weight(.medium))
-                            Text("They will be notified about your invitation in the app.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
-            
-            Section {
-                Button {
-                    copyInviteLink()
-                } label: {
-                    Label {
-                        HStack {
-                            Text("Copy Invite Link")
-                            Spacer()
-                            if copiedLink {
-                                Text("Copied!")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    } icon: {
-                        Image(systemName: "link")
-                    }
-                }
-                
-                if inviteMethod == .email, !trimmedInput.isEmpty, !userExistsOnApp {
-                    Button {
-                        guard let inviteToken else { return }
-                        sendViaEmail(to: trimmedInput, token: inviteToken)
-                    } label: {
-                        Label("Send Invite via Email", systemImage: "envelope")
-                    }
-                    .disabled(inviteToken == nil)
-                }
-            } header: {
-                Text("Invite Options")
-            } footer: {
-                Text("You can use \(displayName) in splits right away. When they accept, your splits will sync with them.")
-            }
-            
-            Section {
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Skip — I'll invite later")
-                        .foregroundStyle(.secondary)
-                }
-            }
+
+    private func previewInitials(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return "?" }
+        let components = trimmed.split(separator: " ")
+        if components.count >= 2 {
+            return "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()
+        }
+        return String(trimmed.prefix(2)).uppercased()
+    }
+
+    private func statusDescription(for friend: ConvexFriend) -> String {
+        switch friend.inviteStatus ?? "none" {
+        case "accepted": return "Connected"
+        case "invite_sent": return "Invite sent"
+        case "invite_received": return "They invited you"
+        case "rejected": return "Declined your invite"
+        case "removed_by_me": return "Removed by you"
+        case "removed_by_them": return "They removed you"
+        default: return "Already in your contacts"
         }
     }
+
+    private var shareURL: URL {
+        URL(string: "https://breakeven.app/join")!
+    }
+
+    private var shareMessage: String {
+        "Join me on BreakEven so we can split expenses together!"
+    }
     
-    // MARK: - Username Search
-    
+    private func blockingExistingFriend(for profile: PublicUserProfile) -> ConvexFriend? {
+        existingFriends.first { friend in
+            friend.linkedUserId == profile._id &&
+            !friend.isSelf &&
+            ["accepted", "invite_sent"].contains(friend.inviteStatus ?? "none")
+        }
+    }
+
+    // MARK: - Username search
+
     private func debounceUsernameSearch() {
         searchTask?.cancel()
-        
-        guard trimmedInput.count >= 3 else {
-            searchState = trimmedInput.isEmpty ? .idle : .idle
+        sentForUserId = nil
+
+        guard trimmedUsername.count >= 3 else {
+            searchState = .idle
             return
         }
-        
+
         searchState = .searching
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            
+
             let subscription = convexService.client.subscribe(
                 to: "users:getUserByUsername",
-                with: ["username": trimmedInput],
+                with: ["username": trimmedUsername],
                 yielding: PublicUserProfile?.self
             )
             .replaceError(with: nil)
             .values
-            
+
             for await result in subscription {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     if let profile = result {
-                        searchState = .found(profile)
+                        if let existing = blockingExistingFriend(for: profile) {
+                            searchState = .alreadyInContacts(existing, profile)
+                        } else {
+                            searchState = .found(profile)
+                        }
                     } else {
                         searchState = .notFound
                     }
@@ -657,208 +533,521 @@ struct AddPersonSheet: View {
             }
         }
     }
-    
-    private func debounceEmailLookup() {
-        searchTask?.cancel()
-        
-        guard let clerkId = clerk.user?.id else {
-            emailLookupState = .idle
-            return
-        }
-        
-        guard isValidEmail(trimmedInput) else {
-            emailLookupState = .idle
-            return
-        }
-        
-        emailLookupState = .checking
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            
-            let subscription = convexService.client.subscribe(
-                to: "friends:checkEmailOnApp",
-                with: [
-                    "clerkId": clerkId,
-                    "email": trimmedInput
-                ],
-                yielding: EmailLookupResponse.self
-            )
-            .replaceError(with: EmailLookupResponse(exists: false, userName: nil))
-            .values
-            
-            for await result in subscription {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    emailLookupState = result.exists ? .onApp(userName: result.userName) : .offApp
-                }
-                break
-            }
-        }
-    }
-    
-    private func isValidEmail(_ value: String) -> Bool {
-        let candidate = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return false }
-        return candidate.contains("@") && candidate.contains(".")
-    }
-    
-    // MARK: - Create Person
-    
-    private func createPerson() {
+
+    // MARK: - Actions
+
+    private func sendInvitationToUser(_ profile: PublicUserProfile) {
         guard let clerkId = clerk.user?.id else {
             error = "Not authenticated"
             return
         }
-        
-        isLoading = true
+
+        isSendingInvite = true
         error = nil
-        
+
         Task {
             do {
-                var args: [String: String] = [
-                    "clerkId": clerkId
-                ]
-                
-                if case .found = searchState {
-                    args["linkedUsername"] = trimmedInput
-                    args["name"] = displayName
-                } else if inviteMethod == .email, case .onApp = emailLookupState {
-                    args["name"] = displayName
-                } else {
-                    args["name"] = trimmedName
-                    if !avatarEmoji.isEmpty {
-                        args["avatarEmoji"] = avatarEmoji
-                    }
-                    if let hex = avatarColorHex {
-                        args["avatarColor"] = hex
-                    }
-                }
-                
-                switch inviteMethod {
-                case .username:
-                    if case .found = searchState {
-                        args["linkedUsername"] = trimmedInput
-                    }
-                case .email:
-                    if !trimmedInput.isEmpty {
-                        args["email"] = trimmedInput
-                    }
-                }
-                
-                let result: CreateFriendResponse = try await convexService.client.mutation(
-                    "friends:createDummyFriend",
-                    with: args
-                )
-                
-                createdFriendId = result.friendId
-                userExistsOnApp = result.userExistsOnApp
-                
-                // Auto-create invitation if we have invite info
-                let hasInviteInfo = !trimmedInput.isEmpty
-                if hasInviteInfo {
-                    var inviteArgs: [String: String] = [
+                let response: SendInvitationToUserResponse = try await convexService.client.mutation(
+                    "invitations:sendInvitationToUser",
+                    with: [
                         "clerkId": clerkId,
-                        "friendId": result.friendId
+                        "targetUserId": profile._id
                     ]
-                    if inviteMethod == .email {
-                        inviteArgs["recipientEmail"] = trimmedInput
-                    }
-                    
-                    let inviteResult: CreateInvitationResponse = try await convexService.client.mutation(
-                        "invitations:createInvitation",
-                        with: inviteArgs
-                    )
-                    
-                    inviteToken = inviteResult.token
-                    
-                    if inviteResult.autoAccepted {
-                        await MainActor.run {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                            dismiss()
-                        }
-                        return
-                    }
-                }
-                
+                )
+
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    isLoading = false
-                    withAnimation { step = .inviteOptions }
+                    isSendingInvite = false
+                    sentForUserId = profile._id
+                    if response.autoAccepted {
+                        dismiss()
+                    }
                 }
             } catch {
                 await MainActor.run {
                     self.error = error.localizedDescription
-                    isLoading = false
+                    isSendingInvite = false
                 }
             }
         }
     }
-    
-    // MARK: - Invite Link Actions
-    
-    private func copyInviteLink() {
-        guard let token = inviteToken else {
-            generateAndCopyInvite()
+
+    private func createPlaceholder() {
+        guard let clerkId = clerk.user?.id else {
+            error = "Not authenticated"
             return
         }
-        
-        let link = "breakeven://invite/\(token)"
-        UIPasteboard.general.string = link
-        copiedLink = true
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            await MainActor.run { copiedLink = false }
-        }
-    }
-    
-    private func generateAndCopyInvite() {
-        guard let clerkId = clerk.user?.id, let friendId = createdFriendId else { return }
-        
+        guard !trimmedPlaceholderName.isEmpty else { return }
+
+        isCreatingPlaceholder = true
+        error = nil
+
         Task {
             do {
                 var args: [String: String] = [
                     "clerkId": clerkId,
-                    "friendId": friendId
+                    "name": trimmedPlaceholderName
                 ]
-                if inviteMethod == .email, !trimmedInput.isEmpty {
-                    args["recipientEmail"] = trimmedInput
+                if !placeholderEmoji.isEmpty {
+                    args["avatarEmoji"] = placeholderEmoji
                 }
-                
-                let result: CreateInvitationResponse = try await convexService.client.mutation(
-                    "invitations:createInvitation",
+                args["avatarColor"] = selectedColorHex
+
+                let _: CreateFriendResponse = try await convexService.client.mutation(
+                    "friends:createDummyFriend",
                     with: args
                 )
-                
-                inviteToken = result.token
-                let link = "breakeven://invite/\(result.token)"
-                UIPasteboard.general.string = link
-                copiedLink = true
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                
-                Task {
-                    try? await Task.sleep(for: .seconds(2))
-                    await MainActor.run { copiedLink = false }
+
+                await MainActor.run {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    isCreatingPlaceholder = false
+                    dismiss()
                 }
             } catch {
-                self.error = error.localizedDescription
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    isCreatingPlaceholder = false
+                }
             }
         }
     }
-    
-    private func sendViaEmail(to emailAddress: String, token: String) {
-        let link = "breakeven://invite/\(token)"
-        let friendName = displayName
-        let subject = "\(friendName), join me on BreakEven!"
-        let body = "Hey \(friendName),\n\nI'd like to split expenses with you on BreakEven. Tap the link below to accept my invitation:\n\n\(link)\n\nSee you there!"
-        
-        let mailtoString = "mailto:\(emailAddress)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&body=\(body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
-        
-        if let url = URL(string: mailtoString) {
-            UIApplication.shared.open(url)
+}
+
+// MARK: - Emoji Carousel
+//
+// SwiftUI owns the fixed center-circle and edge fade. UIKit owns the actual
+// scrolling so we get reliable momentum, snapping, tap-to-center animation,
+// and wrap-around recentering without fighting SwiftUI's scroll state.
+
+private struct EmojiCarousel: View {
+    let baseEmojis: [String]
+    let selectedColor: Color
+    @Binding var selectedEmoji: String
+
+    private let circleSize: CGFloat = 72
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(selectedColor)
+                .frame(width: circleSize, height: circleSize)
+                .animation(.smooth(duration: 0.25), value: selectedColor)
+
+            InfiniteEmojiCarouselView(
+                baseEmojis: baseEmojis,
+                selectedEmoji: $selectedEmoji
+            )
+                .allowsHitTesting(true)
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black, location: 0.12),
+                            .init(color: .black, location: 0.88),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
         }
+    }
+}
+
+private struct HueSlider: View {
+    @Binding var value: Double
+    @GestureState private var isDragging = false
+    
+    private let knobSize: CGFloat = 36
+    private let trackHeight: CGFloat = 24
+    private let innerCircleSize: CGFloat = 18
+    private let gradientColors: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 12.0).map {
+        Color(hue: $0, saturation: 0.72, brightness: 0.96)
+    }
+    
+    private var selectedColor: Color {
+        Color(hue: value, saturation: 0.72, brightness: 0.96)
+    }
+    
+    private func dragGesture(travelWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($isDragging) { _, state, _ in
+                state = true
+            }
+            .onChanged { gesture in
+                updateValue(for: gesture.location.x, travelWidth: travelWidth)
+            }
+    }
+    
+    var body: some View {
+        GeometryReader { geo in
+            let travelWidth = max(0, geo.size.width - knobSize)
+            let knobOffset = travelWidth * value
+            
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.05))
+                    .frame(height: trackHeight)
+                
+                ZStack {
+                    Circle()
+                        .fill(selectedColor)
+                        .frame(width: innerCircleSize, height: innerCircleSize)
+                }
+                .frame(width: knobSize, height: knobSize)
+                .contentShape(Circle())
+                .glassEffect(.clear.tint(.white.opacity(0.2)).interactive(), in: .circle)
+                .scaleEffect(isDragging ? 1.08 : 1)
+                .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isDragging)
+                .offset(x: knobOffset)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(dragGesture(travelWidth: travelWidth))
+        }
+        .frame(height: knobSize)
+    }
+    
+    private func updateValue(for locationX: CGFloat, travelWidth: CGFloat) {
+        let raw = (locationX - (knobSize / 2)) / max(travelWidth, 1)
+        value = min(max(raw, 0), 1)
+    }
+}
+
+private struct InfiniteEmojiCarouselView: UIViewRepresentable {
+    let baseEmojis: [String]
+    @Binding var selectedEmoji: String
+    
+    private let itemSize = CGSize(width: 40, height: 64)
+    private let itemSpacing: CGFloat = 30
+    private let repeatCount = 121
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    func makeUIView(context: Context) -> UICollectionView {
+        let layout = EmojiCarouselFlowLayout(itemSize: itemSize, itemSpacing: itemSpacing)
+        let collectionView = ObservableEmojiCollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.backgroundColor = .clear
+        collectionView.showsHorizontalScrollIndicator = false
+        collectionView.alwaysBounceHorizontal = true
+        collectionView.decelerationRate = .fast
+        collectionView.dataSource = context.coordinator
+        collectionView.delegate = context.coordinator
+        collectionView.register(EmojiCarouselCell.self, forCellWithReuseIdentifier: EmojiCarouselCell.reuseIdentifier)
+        collectionView.onLayout = { [weak coordinator = context.coordinator] in
+            coordinator?.scheduleInitialPositionIfNeeded()
+        }
+        
+        context.coordinator.collectionView = collectionView
+        return collectionView
+    }
+    
+    func updateUIView(_ collectionView: UICollectionView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.syncExternalSelectionIfNeeded()
+    }
+    
+    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegate {
+        var parent: InfiniteEmojiCarouselView
+        weak var collectionView: UICollectionView?
+        
+        private let selectionFeedback = UISelectionFeedbackGenerator()
+        private var centeredAbsoluteIndex: Int?
+        private var centeredNormalizedIndex: Int?
+        private var didApplyInitialPosition = false
+        
+        init(_ parent: InfiniteEmojiCarouselView) {
+            self.parent = parent
+            super.init()
+            selectionFeedback.prepare()
+        }
+        
+        private var totalCount: Int { parent.baseEmojis.count * parent.repeatCount }
+        private var middleStart: Int { (parent.repeatCount / 2) * parent.baseEmojis.count }
+        private var itemStride: CGFloat { parent.itemSize.width + parent.itemSpacing }
+        
+        func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+            totalCount
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+            guard let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: EmojiCarouselCell.reuseIdentifier,
+                for: indexPath
+            ) as? EmojiCarouselCell else {
+                return UICollectionViewCell()
+            }
+            
+            let normalized = normalizedIndex(for: indexPath.item)
+            let isCentered = indexPath.item == centeredAbsoluteIndex
+            cell.configure(emoji: parent.baseEmojis[normalized], isCentered: isCentered)
+            return cell
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+            scrollToAbsoluteIndex(indexPath.item, animated: true)
+        }
+        
+        func scheduleInitialPositionIfNeeded() {
+            guard let collectionView, !didApplyInitialPosition, collectionView.bounds.width > 0 else { return }
+            didApplyInitialPosition = true
+            let target = middleStart + bindingNormalizedIndex()
+            scrollToAbsoluteIndex(target, animated: false)
+            updateCenteredSelection(force: true)
+        }
+        
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateCenteredSelection(force: false)
+        }
+        
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                recenterIfNeeded()
+            }
+        }
+        
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            recenterIfNeeded()
+        }
+        
+        func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+            recenterIfNeeded()
+        }
+        
+        func syncExternalSelectionIfNeeded() {
+            guard didApplyInitialPosition else { return }
+            let desired = bindingNormalizedIndex()
+            guard desired != centeredNormalizedIndex else { return }
+            scrollToAbsoluteIndex(middleStart + desired, animated: false)
+            updateCenteredSelection(force: true)
+        }
+        
+        private func bindingNormalizedIndex() -> Int {
+            parent.baseEmojis.firstIndex(of: parent.selectedEmoji) ?? 0
+        }
+        
+        private func normalizedIndex(for absoluteIndex: Int) -> Int {
+            ((absoluteIndex % parent.baseEmojis.count) + parent.baseEmojis.count) % parent.baseEmojis.count
+        }
+        
+        private func nearestCenteredIndex() -> Int? {
+            guard let collectionView else { return nil }
+            let rawIndex = Int(round(collectionView.contentOffset.x / itemStride))
+            return min(max(rawIndex, 0), totalCount - 1)
+        }
+        
+        private func updateCenteredSelection(force: Bool) {
+            guard let absoluteIndex = nearestCenteredIndex() else { return }
+            let normalized = normalizedIndex(for: absoluteIndex)
+            let didChangeAbsolute = centeredAbsoluteIndex != absoluteIndex
+            let didChangeNormalized = centeredNormalizedIndex != normalized
+            
+            centeredAbsoluteIndex = absoluteIndex
+            
+            if didChangeNormalized || centeredNormalizedIndex == nil {
+                centeredNormalizedIndex = normalized
+                let emoji = parent.baseEmojis[normalized]
+                if parent.selectedEmoji != emoji {
+                    parent.selectedEmoji = emoji
+                }
+                if !force {
+                    selectionFeedback.selectionChanged()
+                    selectionFeedback.prepare()
+                }
+            }
+            
+            updateVisibleCells()
+        }
+        
+        private func updateVisibleCells() {
+            guard let collectionView else { return }
+            
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                guard let cell = collectionView.cellForItem(at: indexPath) as? EmojiCarouselCell else { continue }
+                let emoji = parent.baseEmojis[normalizedIndex(for: indexPath.item)]
+                cell.configure(emoji: emoji, isCentered: indexPath.item == centeredAbsoluteIndex)
+            }
+        }
+        
+        private func scrollToAbsoluteIndex(_ absoluteIndex: Int, animated: Bool) {
+            guard let collectionView else { return }
+            guard absoluteIndex >= 0, absoluteIndex < totalCount else { return }
+            let targetOffset = CGPoint(x: CGFloat(absoluteIndex) * itemStride, y: 0)
+            
+            collectionView.setContentOffset(targetOffset, animated: animated)
+            
+            if !animated {
+                centeredAbsoluteIndex = absoluteIndex
+                centeredNormalizedIndex = normalizedIndex(for: absoluteIndex)
+                updateVisibleCells()
+            }
+        }
+        
+        private func recenterIfNeeded() {
+            guard let absoluteIndex = centeredAbsoluteIndex else { return }
+            let normalized = normalizedIndex(for: absoluteIndex)
+            let target = middleStart + normalized
+            
+            if abs(absoluteIndex - target) > parent.baseEmojis.count {
+                scrollToAbsoluteIndex(target, animated: false)
+            }
+        }
+    }
+}
+
+private final class ObservableEmojiCollectionView: UICollectionView {
+    var onLayout: (() -> Void)?
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
+}
+
+private final class EmojiCarouselFlowLayout: UICollectionViewFlowLayout {
+    private let configuredItemSize: CGSize
+    private let configuredItemSpacing: CGFloat
+    
+    init(itemSize: CGSize, itemSpacing: CGFloat) {
+        self.configuredItemSize = itemSize
+        self.configuredItemSpacing = itemSpacing
+        super.init()
+        scrollDirection = .horizontal
+        minimumLineSpacing = itemSpacing
+        minimumInteritemSpacing = itemSpacing
+        self.itemSize = itemSize
+    }
+    
+    required init?(coder: NSCoder) {
+        return nil
+    }
+    
+    override func prepare() {
+        super.prepare()
+        guard let collectionView else { return }
+        itemSize = configuredItemSize
+        minimumLineSpacing = configuredItemSpacing
+        minimumInteritemSpacing = configuredItemSpacing
+        
+        let horizontalInset = max(0, (collectionView.bounds.width - configuredItemSize.width) / 2)
+        sectionInset = UIEdgeInsets(top: 0, left: horizontalInset, bottom: 0, right: horizontalInset)
+    }
+    
+    override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+        true
+    }
+    
+    override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
+        super.layoutAttributesForElements(in: rect)?
+            .compactMap { $0.copy() as? UICollectionViewLayoutAttributes }
+            .map(applyCenterScaling)
+    }
+    
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+        guard let attributes = super.layoutAttributesForItem(at: indexPath)?.copy() as? UICollectionViewLayoutAttributes else {
+            return nil
+        }
+        return applyCenterScaling(attributes)
+    }
+    
+    override func targetContentOffset(
+        forProposedContentOffset proposedContentOffset: CGPoint,
+        withScrollingVelocity velocity: CGPoint
+    ) -> CGPoint {
+        guard let collectionView else {
+            return super.targetContentOffset(forProposedContentOffset: proposedContentOffset, withScrollingVelocity: velocity)
+        }
+        
+        let proposedRect = CGRect(
+            x: proposedContentOffset.x,
+            y: 0,
+            width: collectionView.bounds.width,
+            height: collectionView.bounds.height
+        )
+        let proposedCenterX = proposedContentOffset.x + (collectionView.bounds.width / 2)
+        let attributes = super.layoutAttributesForElements(in: proposedRect) ?? []
+        
+        guard let nearest = attributes.min(by: {
+            abs($0.center.x - proposedCenterX) < abs($1.center.x - proposedCenterX)
+        }) else {
+            return super.targetContentOffset(forProposedContentOffset: proposedContentOffset, withScrollingVelocity: velocity)
+        }
+        
+        return CGPoint(
+            x: nearest.center.x - (collectionView.bounds.width / 2),
+            y: proposedContentOffset.y
+        )
+    }
+    
+    private func applyCenterScaling(_ attributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        guard let collectionView else { return attributes }
+        
+        let viewportCenterX = collectionView.contentOffset.x + (collectionView.bounds.width / 2)
+        let distanceFromCenter = abs(attributes.center.x - viewportCenterX)
+        let falloffDistance = configuredItemSize.width + configuredItemSpacing
+        let proximity = max(0, 1 - (distanceFromCenter / falloffDistance))
+        let scale = 1 + (0.30 * proximity)
+        
+        attributes.transform = CGAffineTransform(scaleX: scale, y: scale)
+        attributes.zIndex = Int(proximity * 1000)
+        return attributes
+    }
+}
+
+private final class EmojiCarouselCell: UICollectionViewCell {
+    static let reuseIdentifier = "EmojiCarouselCell"
+    
+    private let label = UILabel()
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 31)
+        contentView.addSubview(label)
+        
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+    }
+    
+    required init?(coder: NSCoder) {
+        return nil
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        contentView.transform = .identity
+        contentView.alpha = 1
+    }
+    
+    func configure(emoji: String, isCentered: Bool) {
+        label.text = emoji
+        contentView.alpha = 1
+        contentView.transform = .identity
+    }
+}
+
+private extension UIColor {
+    var hexString: String {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return String(
+            format: "#%02X%02X%02X",
+            Int(round(red * 255)),
+            Int(round(green * 255)),
+            Int(round(blue * 255))
+        )
     }
 }
 

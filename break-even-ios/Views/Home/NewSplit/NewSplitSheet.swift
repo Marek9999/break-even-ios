@@ -10,6 +10,7 @@ import Clerk
 import ConvexMobile
 import UIKit
 
+/// Legacy full-screen new split flow preserved for receipt and edit entry points.
 struct NewSplitSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.clerk) private var clerk
@@ -78,12 +79,21 @@ struct NewSplitSheet: View {
         }
     }
     
-    private var payerSelectionFriends: [ConvexFriend] {
-        if canEditParticipants {
-            return allFriends
+    /// Candidate payers for the wheel picker: self first, then every non-self
+    /// participant. Dedup'd by id so we never show the same person twice.
+    private var paidByOptions: [ConvexFriend] {
+        var options: [ConvexFriend] = []
+        var seenIds: Set<String> = []
+        if let selfCandidate = participantSelfFriend ?? selfFriend {
+            options.append(selfCandidate)
+            seenIds.insert(selfCandidate.id)
         }
-        let lockedSelfId = participantSelfFriend?.id
-        return viewModel.participants.filter { $0.id != lockedSelfId }
+        for friend in viewModel.participants {
+            guard !friend.isSelf, !seenIds.contains(friend.id) else { continue }
+            options.append(friend)
+            seenIds.insert(friend.id)
+        }
+        return options
     }
     
     // MARK: - Body
@@ -133,23 +143,18 @@ struct NewSplitSheet: View {
         contentWithNavigation
             .sheet(isPresented: $showPaidByPicker) {
                 PaidByPickerSheet(
-                    allFriends: payerSelectionFriends,
-                    selfFriend: canEditParticipants ? selfFriend : participantSelfFriend,
-                    selectedFriend: $viewModel.paidBy,
-                    onSelect: { friend in
-                        if !viewModel.participants.contains(where: { $0.id == friend.id }) {
-                            viewModel.addParticipant(friend)
-                        }
-                    }
+                    participants: paidByOptions,
+                    selectedFriend: $viewModel.paidBy
                 )
             }
             .sheet(isPresented: $showReceiptCamera) {
                 ReceiptCameraView { result in handleReceiptScanned(result) }
             }
             .sheet(isPresented: $showAddItemSheet) {
-                AddItemSheet(
+                ItemEditorSheet(
+                    initialItem: nil,
                     currencyCode: viewModel.currency,
-                    onAdd: { name, amount, quantity in
+                    onSave: { name, quantity, amount in
                         viewModel.addItem(name: name, amount: amount, quantity: quantity)
                     }
                 )
@@ -183,6 +188,7 @@ struct NewSplitSheet: View {
                 paidByRow
                 splitMethodRow
                 amountRow
+                totalLockedHintRow
                 friendsSection
                 
                 if viewModel.scannedReceiptImage != nil {
@@ -249,6 +255,7 @@ struct NewSplitSheet: View {
                 availableFriends: selectableFriends,
                 selectedFriends: $viewModel.participants,
                 selfFriend: selfFriend,
+                allFriends: allFriends,
                 onDismiss: { isSearchActive = false }
             )
             .transition(.opacity)
@@ -286,8 +293,13 @@ struct NewSplitSheet: View {
     
     private var emojiTitleRow: some View {
         HStack(spacing: 12) {
-            EmojiTextField(text: $viewModel.emoji)
-                .frame(width: 56, height: 56)
+            EmojiTextField(
+                text: Binding(
+                    get: { viewModel.emoji },
+                    set: { viewModel.selectEmoji($0) }
+                )
+            )
+            .frame(width: 56, height: 56)
             
             TextField("Split Name", text: $viewModel.title)
                 .font(.title2)
@@ -387,8 +399,18 @@ struct NewSplitSheet: View {
                     fieldWidth: fieldWidth
                 )
                 .padding(.leading, amountFieldLeadingPad)
+                .disabled(isTotalLocked)
+                .opacity(isTotalDimmed ? 0.45 : 1)
                 .onChange(of: amountText) { _, newValue in
+                    guard !isTotalLocked else { return }
                     viewModel.totalAmount = Double(newValue) ?? 0
+                }
+                .onChange(of: viewModel.totalAmount) { _, newTotal in
+                    // Keep the visible text in sync when an item edit (in
+                    // By-item mode) pushes a new total into the view model.
+                    if isTotalLocked || !isAmountFocused {
+                        amountText = newTotal > 0 ? String(format: "%.2f", newTotal) : ""
+                    }
                 }
             }
             .background {
@@ -397,6 +419,37 @@ struct NewSplitSheet: View {
         }
         .frame(height: 44)
         .padding(.vertical, 16)
+    }
+    
+    /// In By-item mode the total field is never editable.
+    private var isTotalLocked: Bool {
+        viewModel.splitMethod == .byItem
+    }
+    
+    /// Only dim while the displayed value is not yet the actual split total —
+    /// i.e. a manual entry that's been carried into By-item before any item
+    /// has been added. Once an item exists (or right after a receipt scan) the
+    /// total IS the split total, so it stays at full opacity even though the
+    /// field is still disabled.
+    private var isTotalDimmed: Bool {
+        isTotalLocked && viewModel.items.isEmpty
+    }
+    
+    private var totalLockedHint: String {
+        viewModel.items.isEmpty
+            ? "Add items below to set the total."
+            : "Total is calculated from the items below."
+    }
+    
+    @ViewBuilder
+    private var totalLockedHintRow: some View {
+        if isTotalLocked {
+            Text(totalLockedHint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, -8)
+        }
     }
 
     private var measureFixedElements: some View {
@@ -436,7 +489,8 @@ struct NewSplitSheet: View {
                     onRemove: { friend in
                         viewModel.removeParticipant(friend)
                         if viewModel.paidBy?.id == friend.id {
-                            viewModel.paidBy = nil
+                            viewModel.paidBy = (participantSelfFriend ?? selfFriend)
+                                ?? viewModel.participants.first
                         }
                     }
                 )
@@ -464,7 +518,7 @@ struct NewSplitSheet: View {
         if let image = viewModel.scannedReceiptImage {
             ReceiptPreviewRow(
                 image: image,
-                showMismatchWarning: viewModel.splitMethod == .byItem && viewModel.itemsTotalMismatch,
+                showMismatchWarning: false,
                 itemsTotal: viewModel.itemsTotal,
                 splitTotal: viewModel.totalAmount,
                 currencyCode: viewModel.currency,
@@ -631,8 +685,7 @@ private enum NewSplitSheetPreviewData {
         includeItems: Bool = false
     ) -> NewSplitViewModel {
         let vm = NewSplitViewModel(preSelectedFriend: nil, defaultCurrency: "USD")
-        vm.emoji = "🍕"
-        vm.title = "Dinner at Mario's"
+        vm.prefill(title: "Dinner at Mario's", emoji: "🍕")
         vm.date = Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
         vm.currency = "USD"
         vm.paidBy = selfFriend

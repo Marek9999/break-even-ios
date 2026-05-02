@@ -131,7 +131,20 @@ struct SplitItem: Identifiable, Hashable {
 class NewSplitViewModel {
     // MARK: - Basic Info
     var emoji: String = ""
-    var title: String = ""
+    /// Title for the split. Mutating this in any non-initialiser context will
+    /// auto-suggest an emoji (unless the user has already locked one in via
+    /// the picker — see `emojiManuallyChosen`).
+    var title: String = "" {
+        didSet {
+            guard title != oldValue else { return }
+            autoSuggestEmojiIfNeeded()
+        }
+    }
+    /// Once the user opens the emoji picker and selects something, we stop
+    /// auto-suggesting from the title. Edit-mode init and receipt scans also
+    /// flip this to `true` so we don't clobber an emoji that came from real
+    /// data.
+    var emojiManuallyChosen: Bool = false
     var date: Date = Date()
     var currency: String = "USD"
     
@@ -141,7 +154,20 @@ class NewSplitViewModel {
     
     // MARK: - Amount & Split
     var totalAmount: Double = 0
-    var splitMethod: NewSplitMethod = .equal
+    /// In By-item mode `totalAmount` is the sum of `items` and is kept read-only
+    /// in the UI. Switching INTO By-item with non-empty items snaps `totalAmount`
+    /// back to `itemsTotal`; switching INTO By-item with no items leaves the
+    /// previously typed total in place so a manual entry survives the round-trip
+    /// until the first item is actually added. In any other method the user can
+    /// edit `totalAmount` freely.
+    var splitMethod: NewSplitMethod = .equal {
+        didSet {
+            guard oldValue != splitMethod else { return }
+            if splitMethod == .byItem, !items.isEmpty {
+                totalAmount = itemsTotal
+            }
+        }
+    }
     
     // MARK: - Method-specific data
     /// For unequal split: custom amounts per friend ID
@@ -181,6 +207,12 @@ class NewSplitViewModel {
               paidBy != nil,
               !participants.isEmpty else { return false }
         
+        // In by-item mode a preserved manual total should not make the split
+        // submittable before the user has actually added any items.
+        if splitMethod == .byItem && items.isEmpty {
+            return false
+        }
+        
         if splitMethod == .unequal {
             return abs(unequalSplitDifference) < 0.01
         }
@@ -198,8 +230,13 @@ class NewSplitViewModel {
         items.reduce(0) { $0 + $1.totalPrice }
     }
     
-    var itemsTotalMismatch: Bool {
-        !items.isEmpty && abs(itemsTotal - totalAmount) > 0.01
+    /// Pushes `totalAmount` to match `itemsTotal` whenever we are currently in
+    /// By-item mode. Adding the first item to a previously-empty list will
+    /// overwrite any preserved manual entry — that is the contract.
+    private func syncTotalToItemsIfByItem() {
+        if splitMethod == .byItem {
+            totalAmount = itemsTotal
+        }
     }
     
     // MARK: - Exchange Rates
@@ -223,6 +260,8 @@ class NewSplitViewModel {
         self.editingTransactionId = transaction._id
         self.creatorUserId = transaction.createdById
         self.emoji = transaction.emoji
+        // Preserve the persisted emoji – never auto-suggest in edit mode.
+        self.emojiManuallyChosen = true
         self.title = transaction.title
         self.date = transaction.dateValue
         self.currency = transaction.currency
@@ -371,6 +410,88 @@ class NewSplitViewModel {
         calculateShare(for: friend).asCurrency(code: currency)
     }
     
+    // MARK: - Emoji
+    
+    /// Tracks the in-flight on-device-LLM request so a fast typist doesn't
+    /// queue up a backlog of stale suggestions.
+    @ObservationIgnored private var aiSuggestionTask: Task<Void, Never>?
+    
+    /// Programmatically set the title and the emoji together without letting
+    /// the auto-suggester overwrite the supplied emoji. Use this for previews,
+    /// fixtures, or any non-user code path that wants a specific emoji to
+    /// stick. The emoji is locked in (treated as "manually chosen") so later
+    /// edits to the title won't auto-suggest unless the caller flips
+    /// `emojiManuallyChosen` back to `false`.
+    func prefill(title: String, emoji: String) {
+        aiSuggestionTask?.cancel()
+        self.emoji = emoji
+        self.emojiManuallyChosen = true
+        self.title = title
+    }
+    
+    /// Call this from the picker so we know the user explicitly picked an
+    /// emoji and stop auto-suggesting from the title.
+    func selectEmoji(_ newEmoji: String) {
+        aiSuggestionTask?.cancel()
+        emoji = newEmoji
+        emojiManuallyChosen = true
+    }
+    
+    /// Two-tier suggestion:
+    ///   1. Instantly apply a keyword-based guess so the field never lags.
+    ///      We only *downgrade* the existing emoji to a keyword guess when
+    ///      the new keyword guess is non-empty – this avoids flicker where a
+    ///      good AI-tier emoji gets blanked out on the next keystroke just
+    ///      because the keyword tier doesn't know the new word.
+    ///   2. After a short debounce, ask the on-device Foundation Model for a
+    ///      smarter guess and swap it in if it returns a valid emoji and the
+    ///      title hasn't changed in the meantime.
+    /// No-ops if the user has already manually picked an emoji.
+    private func autoSuggestEmojiIfNeeded() {
+        guard !emojiManuallyChosen else { return }
+        
+        aiSuggestionTask?.cancel()
+        
+        let snapshotTitle = title
+        let trimmed = snapshotTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Empty title -> reset to placeholder.
+        if trimmed.isEmpty {
+            if !emoji.isEmpty { emoji = "" }
+            return
+        }
+        
+        // Keyword tier (instant). Only write when it would change the value
+        // AND the keyword tier actually has an opinion – never wipe a prior
+        // (possibly AI-supplied) emoji just because the keyword tier is
+        // silent for the in-progress title.
+        if let keywordEmoji = EmojiSuggester.suggest(for: snapshotTitle),
+           keywordEmoji != emoji {
+            emoji = keywordEmoji
+        }
+        
+        guard AIEmojiSuggester.shared.isAvailable else { return }
+        
+        aiSuggestionTask = Task { [weak self] in
+            // Debounce – wait for typing to settle before paying for inference.
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, let self else { return }
+            
+            guard let aiEmoji = await AIEmojiSuggester.shared.suggest(for: snapshotTitle) else {
+                return
+            }
+            
+            // Don't apply if the user kept typing, manually picked an emoji,
+            // or the LLM just confirmed what we already show.
+            guard !Task.isCancelled,
+                  self.title == snapshotTitle,
+                  !self.emojiManuallyChosen,
+                  aiEmoji != self.emoji else { return }
+            
+            self.emoji = aiEmoji
+        }
+    }
+    
     // MARK: - Participant Management
     
     func addParticipant(_ friend: ConvexFriend) {
@@ -407,6 +528,7 @@ class NewSplitViewModel {
     func addItem(name: String, amount: Double, quantity: Int = 1) {
         let item = SplitItem(name: name, quantity: quantity, amount: amount)
         items.append(item)
+        syncTotalToItemsIfByItem()
     }
     
     func updateItem(id: UUID, name: String, quantity: Int, amount: Double) {
@@ -414,10 +536,12 @@ class NewSplitViewModel {
         items[index].name = name
         items[index].quantity = quantity
         items[index].amount = amount
+        syncTotalToItemsIfByItem()
     }
     
     func removeItem(_ item: SplitItem) {
         items.removeAll { $0.id == item.id }
+        syncTotalToItemsIfByItem()
     }
     
     func toggleItemAssignment(item: SplitItem, friend: ConvexFriend) {
@@ -529,6 +653,10 @@ class NewSplitViewModel {
     func replaceReceiptData(from result: ReceiptScanResult) {
         receiptFileId = nil
         
+        // Lock the emoji BEFORE writing the title so the title's didSet
+        // doesn't run the auto-suggester and stomp the receipt's emoji.
+        aiSuggestionTask?.cancel()
+        emojiManuallyChosen = true
         title = result.title.isEmpty ? "Receipt" : result.title
         totalAmount = result.total
         emoji = result.emoji ?? "🧾"
@@ -772,6 +900,8 @@ class NewSplitViewModel {
     // MARK: - Reset
     
     func reset() {
+        aiSuggestionTask?.cancel()
+        emojiManuallyChosen = false
         emoji = ""
         title = ""
         date = Date()
@@ -827,8 +957,7 @@ enum NewSplitError: LocalizedError {
 extension NewSplitViewModel {
     static var preview: NewSplitViewModel {
         let vm = NewSplitViewModel()
-        vm.title = "Dinner at Restaurant"
-        vm.emoji = "🍕"
+        vm.prefill(title: "Dinner at Restaurant", emoji: "🍕")
         vm.totalAmount = 120.50
         vm.date = Date()
         return vm
@@ -836,14 +965,13 @@ extension NewSplitViewModel {
     
     static var previewWithItems: NewSplitViewModel {
         let vm = NewSplitViewModel()
-        vm.title = "Grocery Shopping"
-        vm.emoji = "🛒"
+        vm.prefill(title: "Grocery Shopping", emoji: "🛒")
         vm.totalAmount = 85.00
         vm.splitMethod = .byItem
         
-        var item1 = SplitItem(name: "Milk & Eggs", amount: 15.00)
-        var item2 = SplitItem(name: "Snacks", amount: 25.00)
-        var item3 = SplitItem(name: "Household Items", amount: 45.00)
+        let item1 = SplitItem(name: "Milk & Eggs", amount: 15.00)
+        let item2 = SplitItem(name: "Snacks", amount: 25.00)
+        let item3 = SplitItem(name: "Household Items", amount: 45.00)
         
         vm.items = [item1, item2, item3]
         

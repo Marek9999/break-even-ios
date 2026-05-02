@@ -64,6 +64,193 @@ function requireInvitationRecipient(
 }
 
 /**
+ * Internal helper: contains the core invitation-creation logic.
+ *
+ * Used by:
+ * - `createInvitation` (existing public mutation)
+ * - `sendInvitationToUser` (username-driven add flow)
+ * - `friends:linkPlaceholderToUser` (promote a placeholder to a real linked friend)
+ *
+ * Assumes the caller has already authenticated, verified ownership of the friend
+ * row, and (for link/send-to-user paths) set `linkedUserId` on the friend row.
+ */
+export async function createInvitationForFriend(
+  ctx: any,
+  user: Doc<"users">,
+  friendId: Id<"friends">,
+  opts: { recipientEmail?: string; recipientPhone?: string } = {}
+): Promise<{
+  invitationId: Id<"invitations">;
+  token: string;
+  isExisting: boolean;
+  autoAccepted: boolean;
+}> {
+  const friend = await ctx.db.get(friendId);
+  if (!friend) {
+    throw new Error("Friend not found");
+  }
+
+  // Reuse any existing pending invitation for this friend
+  const existingInvitation = await ctx.db
+    .query("invitations")
+    .withIndex("by_friend_status", (q: any) =>
+      q.eq("friendId", friendId).eq("status", "pending")
+    )
+    .unique();
+
+  if (existingInvitation) {
+    return {
+      invitationId: existingInvitation._id,
+      token: existingInvitation.token,
+      isExisting: true,
+      autoAccepted: false,
+    };
+  }
+
+  await ctx.db.patch(friendId, { inviteStatus: "invite_sent" });
+
+  const recipientEmail =
+    normalizeEmail(opts.recipientEmail) ?? normalizeEmail(friend.email);
+
+  // In-app flow when the recipient is on the app
+  if (friend.linkedUserId) {
+    const recipientUser = await ctx.db.get(friend.linkedUserId);
+    if (recipientUser) {
+      const reciprocalFriend = await getReciprocalFriend(
+        ctx,
+        friend.linkedUserId,
+        user._id
+      );
+
+      // Mutual invite — auto-accept both sides
+      if (reciprocalFriend && reciprocalFriend.inviteStatus === "invite_sent") {
+        await ctx.db.patch(friendId, {
+          isDummy: false,
+          inviteStatus: "accepted",
+        });
+        await ctx.db.patch(reciprocalFriend._id, {
+          inviteStatus: "accepted",
+        });
+
+        const theirInvitation = await ctx.db
+          .query("invitations")
+          .withIndex("by_friend_status", (q: any) =>
+            q.eq("friendId", reciprocalFriend._id).eq("status", "pending")
+          )
+          .first();
+
+        if (theirInvitation) {
+          await ctx.db.patch(theirInvitation._id, { status: "accepted" });
+        }
+
+        const token = await generateUniqueToken(ctx);
+        const invitationId = await ctx.db.insert("invitations", {
+          senderId: user._id,
+          friendId,
+          recipientEmail,
+          recipientPhone: opts.recipientPhone || friend.phone,
+          status: "accepted",
+          token,
+          expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+          createdAt: Date.now(),
+        });
+
+        await backfillParticipants(ctx, friendId, friend.linkedUserId);
+        await backfillParticipants(ctx, reciprocalFriend._id, user._id);
+
+        await backfillSettlements(
+          ctx,
+          friendId,
+          user._id,
+          reciprocalFriend._id,
+          friend.linkedUserId!
+        );
+        await backfillSettlements(
+          ctx,
+          reciprocalFriend._id,
+          friend.linkedUserId!,
+          friendId,
+          user._id
+        );
+
+        await insertActivity(ctx, {
+          userId: friend.linkedUserId!,
+          actorId: user._id,
+          actorName: user.name,
+          type: "invitation_accepted",
+          message: `You and ${user.name} are now friends`,
+          friendId,
+          invitationId,
+        });
+        await insertActivity(ctx, {
+          userId: user._id,
+          actorId: friend.linkedUserId!,
+          actorName: recipientUser.name,
+          type: "invitation_accepted",
+          message: `You and ${recipientUser.name} are now friends`,
+          friendId: reciprocalFriend._id,
+        });
+
+        return { invitationId, token, isExisting: false, autoAccepted: true };
+      }
+
+      // Not a mutual invite — create or revive the reciprocal row
+      if (!reciprocalFriend) {
+        await ctx.db.insert("friends", {
+          ownerId: friend.linkedUserId,
+          linkedUserId: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          avatarUrl: user.avatarUrl,
+          isDummy: false,
+          isSelf: false,
+          inviteStatus: "invite_received",
+          createdAt: Date.now(),
+        });
+      } else if (
+        reciprocalFriend.inviteStatus === "removed_by_me" ||
+        reciprocalFriend.inviteStatus === "rejected" ||
+        reciprocalFriend.inviteStatus === "removed_by_them" ||
+        reciprocalFriend.inviteStatus === "none"
+      ) {
+        await ctx.db.patch(reciprocalFriend._id, {
+          inviteStatus: "invite_received",
+        });
+      }
+    }
+  }
+
+  const token = await generateUniqueToken(ctx);
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+  const invitationId = await ctx.db.insert("invitations", {
+    senderId: user._id,
+    friendId,
+    recipientEmail,
+    recipientPhone: opts.recipientPhone || friend.phone,
+    status: "pending",
+    token,
+    expiresAt,
+    createdAt: Date.now(),
+  });
+
+  if (friend.linkedUserId) {
+    await insertActivity(ctx, {
+      userId: friend.linkedUserId,
+      actorId: user._id,
+      actorName: user.name,
+      type: "invitation_received",
+      message: `${user.name} sent you a friend request`,
+      friendId,
+      invitationId,
+    });
+  }
+
+  return { invitationId, token, isExisting: false, autoAccepted: false };
+}
+
+/**
  * Create a friend invitation.
  * - Creates a reciprocal friend row on the recipient's side (if they're on the app)
  *   with inviteStatus "invite_received"
@@ -85,172 +272,74 @@ export const createInvitation = mutation({
     }
     requireOwner(friend.ownerId, user._id);
 
-    // Check for existing pending invitation for this friend
-    const existingInvitation = await ctx.db
-      .query("invitations")
-      .withIndex("by_friend_status", (q) =>
-        q.eq("friendId", args.friendId).eq("status", "pending")
+    return await createInvitationForFriend(ctx, user, args.friendId, {
+      recipientEmail: args.recipientEmail,
+      recipientPhone: args.recipientPhone,
+    });
+  },
+});
+
+/**
+ * Send an invitation directly to a user found via username search.
+ * Creates a fresh `friends` row owned by the caller pointing at the target user
+ * (or reuses an existing row if there already is one), then runs the standard
+ * invitation flow (mutual auto-accept handled inside the helper).
+ */
+export const sendInvitationToUser = mutation({
+  args: {
+    clerkId: v.string(),
+    targetUserId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+
+    if (args.targetUserId === user._id) {
+      throw new Error("Cannot invite yourself");
+    }
+
+    const targetUser = await ctx.db.get(args.targetUserId);
+    if (!targetUser) {
+      throw new Error("User not found");
+    }
+
+    // Reuse any existing friend row pointing at this user
+    let friend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_linkedUser", (q) =>
+        q.eq("ownerId", user._id).eq("linkedUserId", args.targetUserId)
       )
       .unique();
 
-    if (existingInvitation) {
-      return {
-        invitationId: existingInvitation._id,
-        token: existingInvitation.token,
-        isExisting: true,
-        autoAccepted: false,
-      };
-    }
+    let friendId: Id<"friends">;
 
-    // Ensure friend's inviteStatus is set to invite_sent
-    await ctx.db.patch(args.friendId, { inviteStatus: "invite_sent" });
-
-    const recipientEmail = normalizeEmail(args.recipientEmail) ?? normalizeEmail(friend.email);
-
-    // If the friend has a linkedUserId (user is on the app), handle in-app flow
-    if (friend.linkedUserId) {
-      const recipientUser = await ctx.db.get(friend.linkedUserId);
-      if (recipientUser) {
-        // Check for mutual invite: did the recipient already invite the sender?
-        const reciprocalFriend = await getReciprocalFriend(
-          ctx,
-          friend.linkedUserId,
-          user._id
-        );
-
-        if (reciprocalFriend && reciprocalFriend.inviteStatus === "invite_sent") {
-          // Mutual invite detected — auto-accept both sides
-          await ctx.db.patch(args.friendId, {
-            isDummy: false,
-            inviteStatus: "accepted",
-          });
-          await ctx.db.patch(reciprocalFriend._id, {
-            inviteStatus: "accepted",
-          });
-
-          // Accept any pending invitation from the other side
-          const theirInvitation = await ctx.db
-            .query("invitations")
-            .withIndex("by_friend_status", (q) =>
-              q.eq("friendId", reciprocalFriend._id).eq("status", "pending")
-            )
-            .first();
-
-          if (theirInvitation) {
-            await ctx.db.patch(theirInvitation._id, { status: "accepted" });
-          }
-
-          // Create our invitation record as accepted
-          const token = await generateUniqueToken(ctx);
-          const invitationId = await ctx.db.insert("invitations", {
-            senderId: user._id,
-            friendId: args.friendId,
-            recipientEmail,
-            recipientPhone: args.recipientPhone || friend.phone,
-            status: "accepted",
-            token,
-            expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-            createdAt: Date.now(),
-          });
-
-          // Backfill transactionParticipants for both sides
-          await backfillParticipants(ctx, args.friendId, friend.linkedUserId);
-          await backfillParticipants(ctx, reciprocalFriend._id, user._id);
-
-          // Backfill settlements for both directions
-          await backfillSettlements(
-            ctx,
-            args.friendId,
-            user._id,
-            reciprocalFriend._id,
-            friend.linkedUserId!
-          );
-          await backfillSettlements(
-            ctx,
-            reciprocalFriend._id,
-            friend.linkedUserId!,
-            args.friendId,
-            user._id
-          );
-
-          // Activity: mutual auto-accept — notify both sides
-          await insertActivity(ctx, {
-            userId: friend.linkedUserId!,
-            actorId: user._id,
-            actorName: user.name,
-            type: "invitation_accepted",
-            message: `You and ${user.name} are now friends`,
-            friendId: args.friendId,
-            invitationId,
-          });
-          await insertActivity(ctx, {
-            userId: user._id,
-            actorId: friend.linkedUserId!,
-            actorName: recipientUser.name,
-            type: "invitation_accepted",
-            message: `You and ${recipientUser.name} are now friends`,
-            friendId: reciprocalFriend._id,
-          });
-
-          return { invitationId, token, isExisting: false, autoAccepted: true };
-        }
-
-        // Not a mutual invite — create reciprocal friend row with invite_received
-        if (!reciprocalFriend) {
-          await ctx.db.insert("friends", {
-            ownerId: friend.linkedUserId,
-            linkedUserId: user._id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone,
-            avatarUrl: user.avatarUrl,
-            isDummy: false,
-            isSelf: false,
-            inviteStatus: "invite_received",
-            createdAt: Date.now(),
-          });
-        } else if (
-          reciprocalFriend.inviteStatus === "removed_by_me" ||
-          reciprocalFriend.inviteStatus === "rejected" ||
-          reciprocalFriend.inviteStatus === "removed_by_them"
-        ) {
-          // Re-activate the reciprocal row
-          await ctx.db.patch(reciprocalFriend._id, {
-            inviteStatus: "invite_received",
-          });
-        }
-      }
-    }
-
-    // Generate unique token and create the invitation
-    const token = await generateUniqueToken(ctx);
-    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
-
-    const invitationId = await ctx.db.insert("invitations", {
-      senderId: user._id,
-      friendId: args.friendId,
-      recipientEmail,
-      recipientPhone: args.recipientPhone || friend.phone,
-      status: "pending",
-      token,
-      expiresAt,
-      createdAt: Date.now(),
-    });
-
-    // Activity: notify recipient if they're on the app
-    if (friend.linkedUserId) {
-      await insertActivity(ctx, {
-        userId: friend.linkedUserId,
-        actorId: user._id,
-        actorName: user.name,
-        type: "invitation_received",
-        message: `${user.name} sent you a friend request`,
-        friendId: args.friendId,
-        invitationId,
+    if (friend) {
+      // Refresh profile in case it changed
+      await ctx.db.patch(friend._id, {
+        isDummy: false,
+        name: targetUser.name,
+        email: targetUser.email,
+        phone: targetUser.phone,
+        avatarUrl: targetUser.avatarUrl,
+      });
+      friendId = friend._id;
+    } else {
+      friendId = await ctx.db.insert("friends", {
+        ownerId: user._id,
+        linkedUserId: args.targetUserId,
+        name: targetUser.name,
+        email: targetUser.email,
+        phone: targetUser.phone,
+        avatarUrl: targetUser.avatarUrl,
+        isDummy: false,
+        isSelf: false,
+        inviteStatus: "none",
+        createdAt: Date.now(),
       });
     }
 
-    return { invitationId, token, isExisting: false, autoAccepted: false };
+    const result = await createInvitationForFriend(ctx, user, friendId, {});
+
+    return { ...result, friendId };
   },
 });
 
@@ -258,7 +347,7 @@ export const createInvitation = mutation({
  * Backfill transactionParticipants for a friend that just got accepted.
  * Finds all splits referencing this friendId and inserts participant rows.
  */
-async function backfillParticipants(
+export async function backfillParticipants(
   ctx: any,
   friendId: any,
   userId: any
@@ -297,7 +386,7 @@ async function backfillParticipants(
  * Mirrors settlements that the sender created against their friend row
  * onto the acceptor's reciprocal friend row with flipped direction.
  */
-async function backfillSettlements(
+export async function backfillSettlements(
   ctx: any,
   senderFriendId: any,
   senderUserId: any,
@@ -608,6 +697,21 @@ export const acceptInvitationByFriend = mutation({
 
 /**
  * Reject an invitation from the recipient's side.
+ *
+ * The recipient's own row is marked "rejected" so the UI can surface it in a
+ * dedicated "Rejected" section for cleanup.
+ *
+ * The sender's reciprocal row is demoted back to a placeholder
+ * (`isDummy: true`, `linkedUserId` cleared, `inviteStatus: "none"`) so:
+ *   - past splits referencing the row's `_id` keep working
+ *   - the row is splittable again (`"none"` is in `isSplitSelectableStatus`)
+ *   - future settlements stay local (no `linkedUserId` means no reciprocal mirror)
+ *   - the sender can re-invite the same person via the normal placeholder flow
+ *     (link by username), with backfill on accept
+ *
+ * The pending invitation is marked "cancelled" (not "rejected") so a fresh
+ * invitation can be created later via `linkPlaceholderToUser` or
+ * `sendInvitationToUser` without colliding with a stale "rejected" row.
  */
 export const rejectInvitation = mutation({
   args: {
@@ -617,7 +721,6 @@ export const rejectInvitation = mutation({
   handler: async (ctx, args) => {
     const user = await requireAuthenticatedUser(ctx, args.clerkId);
 
-    // This is my friend row with invite_received
     const myFriendRow = await ctx.db.get(args.friendId);
     if (!myFriendRow) {
       throw new Error("Friend not found");
@@ -628,10 +731,8 @@ export const rejectInvitation = mutation({
       throw new Error("No pending invite to reject");
     }
 
-    // Mark my side as rejected
     await ctx.db.patch(args.friendId, { inviteStatus: "rejected" });
 
-    // Find and update the sender's friend row
     if (myFriendRow.linkedUserId) {
       const senderFriendRow = await ctx.db
         .query("friends")
@@ -641,9 +742,14 @@ export const rejectInvitation = mutation({
         .unique();
 
       if (senderFriendRow) {
-        await ctx.db.patch(senderFriendRow._id, { inviteStatus: "rejected" });
+        // Demote the sender's row back to a placeholder so past splits keep
+        // working and the row can be re-invited later.
+        await ctx.db.patch(senderFriendRow._id, {
+          inviteStatus: "none",
+          isDummy: true,
+          linkedUserId: undefined,
+        });
 
-        // Mark the invitation as rejected
         const invitation = await ctx.db
           .query("invitations")
           .withIndex("by_friend_status", (q) =>
@@ -652,11 +758,10 @@ export const rejectInvitation = mutation({
           .first();
 
         if (invitation) {
-          await ctx.db.patch(invitation._id, { status: "rejected" });
+          await ctx.db.patch(invitation._id, { status: "cancelled" });
         }
       }
 
-      // Activity: notify the sender that their invite was rejected
       await insertActivity(ctx, {
         userId: myFriendRow.linkedUserId,
         actorId: user._id,

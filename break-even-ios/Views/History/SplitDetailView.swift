@@ -70,6 +70,10 @@ struct SplitDetailView: View {
         return progress
     }
     
+    private var sectionCardBackground: Color {
+        Color.historyListBackground
+    }
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -96,6 +100,8 @@ struct SplitDetailView: View {
         } action: { _, newValue in
             scrollOffset = newValue
         }
+        .background(Color.homeSectionBackground)
+        .containerBackground(Color.homeSectionBackground, for: .navigation)
         .overlay {
             if showPhotoOverlay,
                let receiptUrl = displayTransaction.receiptUrl,
@@ -240,7 +246,7 @@ struct SplitDetailView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary.opacity(0.6))
+        .background(sectionCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24))
     }
     
@@ -265,7 +271,7 @@ struct SplitDetailView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(.background.secondary.opacity(0.6))
+            .background(sectionCardBackground)
             .clipShape(RoundedRectangle(cornerRadius: 24))
         }
     }
@@ -343,7 +349,7 @@ struct SplitDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.background.secondary.opacity(0.6))
+        .background(sectionCardBackground)
         .clipShape(Capsule())
     }
     
@@ -457,7 +463,7 @@ struct SplitDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 18)
-        .background(.background.secondary.opacity(0.6))
+        .background(sectionCardBackground)
         .clipShape(
             UnevenRoundedRectangle(
                 topLeadingRadius: topRadius,

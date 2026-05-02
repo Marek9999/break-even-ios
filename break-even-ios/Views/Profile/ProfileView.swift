@@ -27,9 +27,12 @@ struct ProfileView: View {
     @Environment(\.convexService) private var convexService
     @Environment(\.notificationManager) private var notificationManager
     @Environment(\.openURL) private var openURL
+    @Environment(\.sessionCoordinator) private var sessionCoordinator
     
     @Binding var isDetailShowing: Bool
     @Binding var externalNavigationRequest: ProfileExternalNavigationRequest?
+    let usesProfileSheetChrome: Bool
+    let onDismiss: (() -> Void)?
     
     @State private var viewModel = ProfileViewModel()
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -44,8 +47,12 @@ struct ProfileView: View {
         "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
     }
     
+    private var sectionCardBackground: Color {
+        Color.historyListBackground
+    }
+    
     private var displayName: String {
-        if let convexName = viewModel.currentUser?.name, !convexName.isEmpty {
+        if let convexName = currentUser?.name, !convexName.isEmpty {
             return convexName
         }
         if let user = clerk.user {
@@ -62,7 +69,7 @@ struct ProfileView: View {
     
     private var userEmail: String {
         clerk.user?.primaryEmailAddress?.emailAddress
-            ?? viewModel.currentUser?.email
+            ?? currentUser?.email
             ?? ""
     }
     
@@ -74,15 +81,23 @@ struct ProfileView: View {
         }
         return "U"
     }
+
+    private var currentUser: ConvexUser? {
+        sessionCoordinator.currentUser
+    }
     
     // MARK: - Body
     
     init(
         isDetailShowing: Binding<Bool> = .constant(false),
-        externalNavigationRequest: Binding<ProfileExternalNavigationRequest?> = .constant(nil)
+        externalNavigationRequest: Binding<ProfileExternalNavigationRequest?> = .constant(nil),
+        usesProfileSheetChrome: Bool = false,
+        onDismiss: (() -> Void)? = nil
     ) {
         _isDetailShowing = isDetailShowing
         _externalNavigationRequest = externalNavigationRequest
+        self.usesProfileSheetChrome = usesProfileSheetChrome
+        self.onDismiss = onDismiss
     }
     
     var body: some View {
@@ -123,16 +138,32 @@ struct ProfileView: View {
             .background(alignment: .top) {
                 gradientOverlay
             }
+            .toolbar {
+                if usesProfileSheetChrome {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            onDismiss?()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.subheadline)
+                        }
+                        .accessibilityLabel("Dismiss")
+                    }
+                }
+            }
             .navigationDestination(for: ProfileDestination.self) { destination in
                 profileDestinationView(for: destination)
             }
             .sheet(isPresented: $viewModel.showAddContact) {
                 AddPersonSheet()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+                    .presentationCompactAdaptation(.sheet)
             }
             .sheet(isPresented: $viewModel.showCurrencyPicker) {
                 CurrencyPickerSheet(
                     selectedCurrency: Binding(
-                        get: { viewModel.currentUser?.defaultCurrency ?? "USD" },
+                        get: { currentUser?.defaultCurrency ?? "USD" },
                         set: { updateUserCurrency(to: $0) }
                     )
                 )
@@ -197,6 +228,9 @@ struct ProfileView: View {
             }
             .onChange(of: externalNavigationRequest) { _, newValue in
                 handleExternalNavigation(newValue)
+            }
+            .onAppear {
+                handleExternalNavigation(externalNavigationRequest)
             }
             .task(id: subscriptionKey) {
                 startSubscriptions()
@@ -322,7 +356,7 @@ struct ProfileView: View {
             Divider().padding(.horizontal)
             
             Button {
-                editedUsername = viewModel.currentUser?.username ?? ""
+                editedUsername = currentUser?.username ?? ""
                 usernameError = nil
                 showEditUsername = true
             } label: {
@@ -330,7 +364,7 @@ struct ProfileView: View {
                     Text("Username")
                         .foregroundStyle(.text.opacity(0.6))
                     Spacer()
-                    if let displayUsername = viewModel.currentUser?.displayUsername {
+                    if let displayUsername = currentUser?.displayUsername {
                         Text(displayUsername)
                             .fontWeight(.medium)
                             .font(.body.monospaced())
@@ -357,17 +391,17 @@ struct ProfileView: View {
             Divider().padding(.horizontal)
             infoRow(label: "Email", value: userEmail)
         }
-        .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+        .background(sectionCardBackground, in: RoundedRectangle(cornerRadius: 20))
     }
     
     private var usernameEditAllowed: Bool {
-        guard let changedAt = viewModel.currentUser?.usernameChangedAt else { return true }
+        guard let changedAt = currentUser?.usernameChangedAt else { return true }
         let hoursSince = (Date().timeIntervalSince1970 * 1000 - changedAt) / (1000 * 60 * 60)
         return hoursSince >= 48
     }
     
     private var usernameCooldownText: String? {
-        guard let changedAt = viewModel.currentUser?.usernameChangedAt else { return nil }
+        guard let changedAt = currentUser?.usernameChangedAt else { return nil }
         let hoursSince = (Date().timeIntervalSince1970 * 1000 - changedAt) / (1000 * 60 * 60)
         if hoursSince < 48 {
             let remaining = Int(ceil(48 - hoursSince))
@@ -424,7 +458,7 @@ struct ProfileView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 140)
-            .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+            .background(sectionCardBackground, in: RoundedRectangle(cornerRadius: 20))
         }
         .buttonStyle(.plain)
     }
@@ -453,7 +487,7 @@ struct ProfileView: View {
     // MARK: Currency Card
     
     private var currencyCard: some View {
-        let currencyCode = viewModel.currentUser?.defaultCurrency ?? "USD"
+        let currencyCode = currentUser?.defaultCurrency ?? "USD"
         let currency = SupportedCurrency.from(code: currencyCode)
         let flag = currency?.flag ?? "🇺🇸"
         
@@ -485,7 +519,7 @@ struct ProfileView: View {
             .background(
                 ZStack(alignment: .top) {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(.background.secondary.opacity(0.6))
+                        .fill(sectionCardBackground)
                     
                     currencyGradient(for: currency)
                         .frame(height: 80)
@@ -569,7 +603,7 @@ struct ProfileView: View {
                 }
             }
             .padding()
-            .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+            .background(sectionCardBackground, in: RoundedRectangle(cornerRadius: 20))
         }
     }
     
@@ -609,7 +643,7 @@ struct ProfileView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .padding()
-                .background(.background.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 20))
+                .background(sectionCardBackground, in: RoundedRectangle(cornerRadius: 20))
             }
             .buttonStyle(.plain)
         }
@@ -683,7 +717,7 @@ struct ProfileView: View {
                         debugRow(label: "Seed Sample Data", icon: "wand.and.stars")
                     }
                 }
-                .disabled(viewModel.isSeedingData || viewModel.currentUser == nil)
+                .disabled(viewModel.isSeedingData || currentUser == nil)
                 
                 Divider().padding(.leading, 16)
                 
@@ -698,7 +732,7 @@ struct ProfileView: View {
                         debugRow(label: "Nuke All Data", icon: "trash.fill", destructive: true)
                     }
                 }
-                .disabled(viewModel.isClearingData || viewModel.currentUser == nil)
+                .disabled(viewModel.isClearingData || currentUser == nil)
             }
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             
@@ -764,7 +798,6 @@ struct ProfileView: View {
     private func startSubscriptions() {
         guard let clerkId = clerk.user?.id else { return }
         viewModel.subscribeToFriends(clerkId: clerkId)
-        viewModel.subscribeToUser(clerkId: clerkId)
         viewModel.subscribeToInvitations(clerkId: clerkId)
         viewModel.subscribeToReceivedInvitations(clerkId: clerkId)
     }

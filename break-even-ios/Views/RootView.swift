@@ -7,161 +7,127 @@
 
 import SwiftUI
 import Clerk
-import ConvexMobile
-internal import Combine
 
 struct RootView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
-    
-    @State private var needsUsername: Bool? = nil
-    @State private var userSubscription: Task<Void, Never>?
-    @State private var authErrorMessage: String?
-    
-    private var subscriptionKey: String {
-        "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
+    @Environment(\.sessionCoordinator) private var sessionCoordinator
+
+    private var currentUserSubscriptionKey: String {
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.sessionState):\(convexService.subscriptionRestartToken)"
     }
-    
-    private var shouldBlockAuthenticatedContent: Bool {
-        clerk.user != nil && convexService.sessionState != .authenticated
+
+    private var needsUsername: Bool? {
+        guard let currentUser = sessionCoordinator.currentUser else { return nil }
+        return currentUser.username == nil || currentUser.username?.isEmpty == true
+    }
+
+    private var startupRecoveryMessage: String? {
+        sessionCoordinator.currentUserErrorMessage ?? convexService.lastRecoveryError
+    }
+
+    private var shouldShowUsernameSetup: Bool {
+        sessionCoordinator.currentUserLoadState == .loaded && needsUsername == true
+    }
+
+    private var shouldShowMainShell: Bool {
+        sessionCoordinator.currentUserLoadState == .loaded && needsUsername == false
     }
     
     var body: some View {
         Group {
-            if clerk.user != nil {
-                if shouldBlockAuthenticatedContent {
-                    authRecoveryView
-                } else if needsUsername == true {
+            switch sessionCoordinator.authPhase {
+            case .bootstrapping:
+                bootstrapView
+            case .signedOut:
+                LoginView()
+            case .signedIn:
+                if shouldShowUsernameSetup {
                     UsernameSetupView {
-                        withAnimation { needsUsername = false }
+                        Task {
+                            try? await convexService.recoverAuthenticatedSession(
+                                clerk: clerk,
+                                forceTokenRefresh: true,
+                                restartSubscriptions: false
+                            )
+                        }
                     }
                     .transition(.move(edge: .trailing))
-                } else if needsUsername == false {
-                    MainTabView()
                 } else {
-                    ProgressView()
+                    authenticatedContent
                 }
-            } else {
-                LoginView()
             }
         }
-        .task(id: subscriptionKey) {
-            guard let clerkUser = clerk.user else {
-                needsUsername = nil
-                authErrorMessage = nil
-                userSubscription?.cancel()
+        .task(id: currentUserSubscriptionKey) {
+            guard sessionCoordinator.authPhase == .signedIn,
+                  let clerkId = clerk.user?.id,
+                  convexService.sessionState == .authenticated else {
                 return
             }
-            
-            guard convexService.sessionState == .authenticated else {
-                needsUsername = nil
-                return
-            }
-            
-            do {
-                try await convexService.syncUser(clerk: clerk)
-            } catch {
-                authErrorMessage = error.localizedDescription
-                #if DEBUG
-                print("Failed to sync user with Convex: \(error)")
-                #endif
-            }
-            
-            authErrorMessage = nil
-            userSubscription?.cancel()
-            userSubscription = Task {
-                do {
-                    let subscription = convexService.client.subscribe(
-                        to: "users:getCurrentUser",
-                        with: ["clerkId": clerkUser.id],
-                        yielding: ConvexUser?.self
-                    )
-                    .values
-                    
-                    for try await user in subscription {
-                        if Task.isCancelled { break }
-                        authErrorMessage = nil
-                        let hasUsername = user?.username != nil && !(user?.username?.isEmpty ?? true)
-                        if needsUsername == nil {
-                            needsUsername = !hasUsername
-                        } else if hasUsername {
-                            needsUsername = false
-                        }
-                    }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    if Task.isCancelled { return }
-                    authErrorMessage = error.localizedDescription
-                    needsUsername = nil
-                    
-                    #if DEBUG
-                    print("users:getCurrentUser subscription failed: \(error)")
-                    #endif
-                    
-                    do {
-                        try await convexService.recoverAuthenticatedSession(
-                            clerk: clerk,
-                            forceTokenRefresh: true
-                        )
-                    } catch {
-                        #if DEBUG
-                        print("Convex recovery retry from RootView failed: \(error)")
-                        #endif
-                    }
-                }
-            }
+
+            sessionCoordinator.startCurrentUserSubscription(
+                clerkId: clerkId,
+                restartToken: convexService.subscriptionRestartToken,
+                client: convexService.client
+            )
         }
     }
-    
+
     @ViewBuilder
-    private var authRecoveryView: some View {
-        if let message = authErrorMessage {
+    private var bootstrapView: some View {
+        if let message = sessionCoordinator.bootstrapErrorMessage {
             ContentUnavailableView(
-                "Reconnecting",
-                systemImage: "arrow.triangle.2.circlepath",
+                "Couldn't Restore Your Session",
+                systemImage: "person.crop.circle.badge.exclamationmark",
                 description: Text(message)
             )
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
                     Button("Try Again") {
-                        Task {
-                            do {
-                                try await convexService.recoverAuthenticatedSession(
-                                    clerk: clerk,
-                                    forceTokenRefresh: true
-                                )
-                            } catch {
-                                authErrorMessage = error.localizedDescription
-                            }
-                        }
-                    }
-                }
-            }
-        } else if let message = convexService.lastRecoveryError {
-            ContentUnavailableView(
-                "Reconnecting",
-                systemImage: "arrow.triangle.2.circlepath",
-                description: Text(message)
-            )
-            .toolbar {
-                ToolbarItem(placement: .bottomBar) {
-                    Button("Try Again") {
-                        Task {
-                            do {
-                                try await convexService.recoverAuthenticatedSession(
-                                    clerk: clerk,
-                                    forceTokenRefresh: true
-                                )
-                            } catch {
-                                authErrorMessage = error.localizedDescription
-                            }
-                        }
+                        sessionCoordinator.retryBootstrap()
                     }
                 }
             }
         } else {
-            ProgressView("Restoring your data...")
+            launchHoldScreen
+        }
+    }
+
+    @ViewBuilder
+    private var authenticatedContent: some View {
+        if shouldShowMainShell {
+            MainTabView()
+        } else if case .failed = sessionCoordinator.currentUserLoadState,
+                  let message = startupRecoveryMessage {
+            authRecoveryView(message: message)
+        } else {
+            launchHoldScreen
+        }
+    }
+
+    private var launchHoldScreen: some View {
+        Color.black
+            .ignoresSafeArea()
+    }
+
+    private func authRecoveryView(message: String) -> some View {
+        ContentUnavailableView(
+            "Reconnecting",
+            systemImage: "arrow.triangle.2.circlepath",
+            description: Text(message)
+        )
+        .toolbar {
+            ToolbarItem(placement: .bottomBar) {
+                Button("Try Again") {
+                    Task {
+                        try? await convexService.recoverAuthenticatedSession(
+                            clerk: clerk,
+                            forceTokenRefresh: true,
+                            restartSubscriptions: false
+                        )
+                    }
+                }
+            }
         }
     }
 }

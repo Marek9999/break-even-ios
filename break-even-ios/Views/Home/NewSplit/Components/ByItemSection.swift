@@ -15,14 +15,6 @@ struct ByItemSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if viewModel.scannedReceiptImage == nil && viewModel.itemsTotalMismatch {
-                ItemsTotalMismatchBar(
-                    itemsTotal: viewModel.itemsTotal,
-                    splitTotal: viewModel.totalAmount,
-                    currencyCode: viewModel.currency
-                )
-            }
-            
             if !viewModel.items.isEmpty {
                 columnHeaders
                 itemsList

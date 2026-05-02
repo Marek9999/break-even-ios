@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		818C4C042F1D437400647D3D /* Clerk in Frameworks */ = {isa = PBXBuildFile; productRef = 818C4C032F1D437400647D3D /* Clerk */; };
 		818C4C122F1D796200647D3D /* ConvexMobile in Frameworks */ = {isa = PBXBuildFile; productRef = 818C4C112F1D796200647D3D /* ConvexMobile */; };
+		81A000032F9D5B1200A00001 /* Glur in Frameworks */ = {isa = PBXBuildFile; productRef = 81A000022F9D5B1200A00001 /* Glur */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,9 +35,23 @@
 		81238E1B2F0079D700D19591 /* break-even-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "break-even-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		816B810A2F8C474C0053D0BF /* Exceptions for "break-even-ios" folder in "break-even-ios" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ClerkConfiguration.xcconfig,
+				ConvexConfiguration.xcconfig,
+			);
+			target = 81238E032F0079D600D19591 /* break-even-ios */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		81238E062F0079D600D19591 /* break-even-ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				816B810A2F8C474C0053D0BF /* Exceptions for "break-even-ios" folder in "break-even-ios" target */,
+			);
 			path = "break-even-ios";
 			sourceTree = "<group>";
 		};
@@ -59,6 +74,7 @@
 			files = (
 				818C4C042F1D437400647D3D /* Clerk in Frameworks */,
 				818C4C122F1D796200647D3D /* ConvexMobile in Frameworks */,
+				81A000032F9D5B1200A00001 /* Glur in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,6 +145,7 @@
 			packageProductDependencies = (
 				818C4C032F1D437400647D3D /* Clerk */,
 				818C4C112F1D796200647D3D /* ConvexMobile */,
+				81A000022F9D5B1200A00001 /* Glur */,
 			);
 			productName = "break-even-ios";
 			productReference = 81238E042F0079D600D19591 /* break-even-ios.app */;
@@ -188,7 +205,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					81238E032F0079D600D19591 = {
 						CreatedOnToolsVersion = 26.2;
@@ -215,6 +232,7 @@
 			packageReferences = (
 				818C4C022F1D437400647D3D /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				818C4C0E2F1D707F00647D3D /* XCRemoteSwiftPackageReference "convex-swift" */,
+				81A000012F9D5B1200A00001 /* XCRemoteSwiftPackageReference "Glur" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 81238E052F0079D600D19591 /* Products */;
@@ -350,6 +368,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -408,6 +427,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -639,6 +659,14 @@
 				minimumVersion = 0.7.0;
 			};
 		};
+		81A000012F9D5B1200A00001 /* XCRemoteSwiftPackageReference "Glur" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/joogps/Glur";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.4;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -651,6 +679,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 818C4C0E2F1D707F00647D3D /* XCRemoteSwiftPackageReference "convex-swift" */;
 			productName = ConvexMobile;
+		};
+		81A000022F9D5B1200A00001 /* Glur */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 81A000012F9D5B1200A00001 /* XCRemoteSwiftPackageReference "Glur" */;
+			productName = Glur;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

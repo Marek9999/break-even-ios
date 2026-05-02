@@ -28,15 +28,17 @@ struct SplitBreakdownView: View {
     // MARK: - Equal Split View
     
     private var equalSplitView: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: 3)
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
         
-        return LazyVGrid(columns: columns, spacing: 28) {
+        return LazyVGrid(columns: columns, spacing: 24) {
             ForEach(viewModel.participants, id: \.id) { friend in
                 VStack(spacing: 6) {
-                    FriendAvatar(friend: friend, size: 56)
+                    FriendAvatar(friend: friend, size: 44)
                     Text(viewModel.formattedShare(for: friend))
-                        .font(.subheadline)
+                        .font(.footnote)
                         .fontWeight(.medium)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
         }

@@ -14,23 +14,14 @@ struct MainTabView: View {
     @Environment(\.convexService) private var convexService
     @Environment(\.notificationManager) private var notificationManager
     
-    @State private var selectedTab = 0
-    @State private var searchText = ""
-    @State private var isHistoryScrolled = false
-    @State private var isSearchActive = false
-    @State private var isHistoryDetailShowing = false
-    @State private var isProfileDetailShowing = false
+    @State private var isProfileSheetPresented = false
+    @State private var isProfileSheetDetailShowing = false
     
-    @State private var isActivityScrolled = false
-    @State private var isActivityDetailShowing = false
-    @State private var activitySearchText = ""
-    @State private var isActivitySearchActive = false
-    @State private var historyNavigationRequest: HistoryExternalNavigationRequest?
+    @State private var isActivitySheetPresented = false
+    @State private var historyRequest: HomeHistoryRequest?
     
     @State private var activityViewModel = ActivityViewModel()
-    @State private var profileNavigationRequest: ProfileExternalNavigationRequest?
-    
-    @FocusState private var isSearchFocused: Bool
+    @State private var profileSheetNavigationRequest: ProfileExternalNavigationRequest?
     
     private var userAvatarUrl: String? {
         clerk.user?.imageUrl
@@ -47,134 +38,53 @@ struct MainTabView: View {
         return "U"
     }
     
-    private var currentSearchText: Binding<String> {
-        selectedTab == 3 ? $activitySearchText : $searchText
-    }
-    
-    private var currentSearchActive: Binding<Bool> {
-        selectedTab == 3 ? $isActivitySearchActive : $isSearchActive
-    }
-    
-    private var isCurrentDetailShowing: Bool {
-        switch selectedTab {
-        case 1: return isHistoryDetailShowing
-        case 3: return isActivityDetailShowing
-        default: return false
-        }
-    }
-    
-    private var searchPlaceholder: String {
-        selectedTab == 3 ? "Search activity..." : "Search past splits..."
-    }
-    
     private var subscriptionKey: String {
         "\(clerk.user?.id ?? "signed-out"):\(convexService.subscriptionRestartToken)"
     }
     
     var body: some View {
-        ZStack {
-            NavigationStack {
-                HomeView { transactionId in
-                    historyNavigationRequest = .transaction(transactionId)
-                    withAnimation(.spring(duration: 0.35)) {
-                        selectedTab = 1
-                    }
-                }
-            }
-            .opacity(selectedTab == 0 ? 1 : 0)
-            .zIndex(selectedTab == 0 ? 1 : 0)
-            
-            HistoryView(
-                searchText: $searchText,
-                isScrolled: $isHistoryScrolled,
-                isDetailShowing: $isHistoryDetailShowing,
-                externalNavigationRequest: $historyNavigationRequest
-            )
-            .opacity(selectedTab == 1 ? 1 : 0)
-            .zIndex(selectedTab == 1 ? 1 : 0)
-            
-            ProfileView(
-                isDetailShowing: $isProfileDetailShowing,
-                externalNavigationRequest: $profileNavigationRequest
-            )
-                .opacity(selectedTab == 2 ? 1 : 0)
-                .zIndex(selectedTab == 2 ? 1 : 0)
-            
-            ActivityView(
-                searchText: $activitySearchText,
-                isScrolled: $isActivityScrolled,
-                isDetailShowing: $isActivityDetailShowing,
-                onNavigateToFriends: {
-                    profileNavigationRequest = .friends
-                    withAnimation(.spring(duration: 0.35)) {
-                        selectedTab = 2
-                    }
-                }
-            )
-            .opacity(selectedTab == 3 ? 1 : 0)
-            .zIndex(selectedTab == 3 ? 1 : 0)
-        }
-        .safeAreaBar(edge: .bottom, spacing: 0) {
-            if !isProfileDetailShowing {
-                CustomTabBar(
-                    selectedTab: $selectedTab,
-                    isHistoryScrolled: $isHistoryScrolled,
-                    isActivityScrolled: $isActivityScrolled,
-                    searchText: currentSearchText,
-                    isSearchActive: currentSearchActive,
-                    isDetailShowing: isCurrentDetailShowing,
-                    userAvatarUrl: userAvatarUrl,
-                    userInitials: userInitials,
-                    unreadActivityCount: activityViewModel.unreadCount
-                )
-            }
-        }
+        HomeView(
+            userAvatarUrl: userAvatarUrl,
+            userInitials: userInitials,
+            unreadActivityCount: activityViewModel.unreadCount,
+            onOpenProfile: {
+                presentProfileSheet()
+            },
+            onOpenActivity: {
+                presentActivitySheet()
+            },
+            onOpenTransactionInHistory: { transactionId in
+                historyRequest = .openTransaction(transactionId)
+            },
+            historyRequest: $historyRequest
+        )
         .ignoresSafeArea(.keyboard)
-        .overlay(alignment: .bottom) {
-            if isSearchActive && selectedTab == 1 && !isHistoryDetailShowing {
-                searchBarOverlay(placeholder: "Search past splits...", text: $searchText, onCancel: { cancelSearch() })
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            if isActivitySearchActive && selectedTab == 3 && !isActivityDetailShowing {
-                searchBarOverlay(placeholder: "Search activity...", text: $activitySearchText, onCancel: { cancelActivitySearch() })
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.spring(duration: 0.3), value: isSearchActive)
-        .animation(.spring(duration: 0.3), value: isActivitySearchActive)
-        .animation(.spring(duration: 0.35), value: isHistoryDetailShowing)
-        .animation(.spring(duration: 0.35), value: isActivityDetailShowing)
-        .animation(.spring(duration: 0.35), value: isProfileDetailShowing)
-        .onChange(of: selectedTab) { oldValue, newValue in
-            if oldValue == 1 && newValue != 1 {
-                cancelSearch()
-            }
-            if oldValue == 3 && newValue != 3 {
-                cancelActivitySearch()
-            }
-            if newValue == 3, let clerkId = clerk.user?.id {
-                activityViewModel.markAllAsRead(clerkId: clerkId)
-            }
-        }
-        .onChange(of: isSearchActive) { _, newValue in
-            if newValue {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isSearchFocused = true
+        .sheet(isPresented: $isActivitySheetPresented) {
+            ActivityView(
+                searchText: .constant(""),
+                isScrolled: .constant(false),
+                isDetailShowing: .constant(false),
+                onNavigateToFriends: {
+                    presentProfileSheet(destination: .friends)
+                },
+                usesSheetChrome: true,
+                onDismiss: {
+                    isActivitySheetPresented = false
                 }
-            }
+            )
+            .presentationDetents([.large])
+            .presentationBackground(Color.homeSectionBackground)
+            .presentationCornerRadius(36)
         }
-        .onChange(of: isActivitySearchActive) { _, newValue in
-            if newValue {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isSearchFocused = true
-                }
-            }
+        .sheet(isPresented: $isProfileSheetPresented) {
+            profileSheet
+                .presentationDetents([.large])
+                .presentationBackground(Color.homeSectionBackground)
+                .presentationCornerRadius(36)
         }
-        .onChange(of: isSearchFocused) { _, focused in
-            if !focused {
-                if isSearchActive { cancelSearch() }
-                if isActivitySearchActive { cancelActivitySearch() }
-            }
+        .onChange(of: isActivitySheetPresented) { _, isPresented in
+            guard isPresented, let clerkId = clerk.user?.id else { return }
+            activityViewModel.markAllAsRead(clerkId: clerkId)
         }
         .task(id: subscriptionKey) {
             if let clerkId = clerk.user?.id {
@@ -188,72 +98,24 @@ struct MainTabView: View {
             applyPendingNotificationRouteIfNeeded()
         }
     }
+
+    private func presentActivitySheet() {
+        isActivitySheetPresented = true
+    }
     
-    // MARK: - Search Bar Overlay
-    
-    @ViewBuilder
-    private func searchBarOverlay(placeholder: String, text: Binding<String>, onCancel: @escaping () -> Void) -> some View {
-        GlassEffectContainer(spacing: 20) {
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.text)
-                    
-                    TextField(
-                        "",
-                        text: text,
-                        prompt: Text(placeholder)
-                            .foregroundStyle(.text.opacity(0.6))
-                    )
-                    .focused($isSearchFocused)
-                    .submitLabel(.search)
-                    .foregroundStyle(.text)
-                    
-                    Button {
-                        text.wrappedValue = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.text.opacity(0.6))
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(text.wrappedValue.isEmpty ? 0 : 1)
-                    .disabled(text.wrappedValue.isEmpty)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .frame(height: 44)
-                .glassEffect()
-                
-                Button {
-                    onCancel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .medium))
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.glass)
+    private func presentProfileSheet(destination: ProfileExternalNavigationRequest? = nil) {
+        isProfileSheetDetailShowing = false
+        
+        if isActivitySheetPresented {
+            isActivitySheetPresented = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                profileSheetNavigationRequest = destination
+                isProfileSheetPresented = true
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+        } else {
+            profileSheetNavigationRequest = destination
+            isProfileSheetPresented = true
         }
-    }
-    
-    private func cancelSearch() {
-        withAnimation(.spring(duration: 0.3)) {
-            isSearchActive = false
-            searchText = ""
-        }
-        isSearchFocused = false
-    }
-    
-    private func cancelActivitySearch() {
-        withAnimation(.spring(duration: 0.3)) {
-            isActivitySearchActive = false
-            activitySearchText = ""
-        }
-        isSearchFocused = false
     }
     
     private func applyPendingNotificationRouteIfNeeded() {
@@ -265,15 +127,26 @@ struct MainTabView: View {
         withAnimation(.spring(duration: 0.35)) {
             switch route {
             case .transaction(let transactionId):
-                historyNavigationRequest = .transaction(transactionId)
-                selectedTab = 1
+                historyRequest = .openTransaction(transactionId)
             case .friends:
-                profileNavigationRequest = .friends
-                selectedTab = 2
+                presentProfileSheet(destination: .friends)
             case .activity:
-                selectedTab = 3
+                isActivitySheetPresented = true
             }
         }
+    }
+    
+    private var profileSheet: some View {
+        ProfileView(
+            isDetailShowing: $isProfileSheetDetailShowing,
+            externalNavigationRequest: $profileSheetNavigationRequest,
+            usesProfileSheetChrome: true,
+            onDismiss: {
+                isProfileSheetPresented = false
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.homeSectionBackground)
     }
 }
 
