@@ -17,21 +17,21 @@ struct RootView: View {
         "\(clerk.user?.id ?? "signed-out"):\(convexService.sessionState):\(convexService.subscriptionRestartToken)"
     }
 
-    private var needsUsername: Bool? {
+    private var needsOnboarding: Bool? {
         guard let currentUser = sessionCoordinator.currentUser else { return nil }
-        return currentUser.username == nil || currentUser.username?.isEmpty == true
+        return !currentUser.hasCompletedOnboarding
     }
 
     private var startupRecoveryMessage: String? {
         sessionCoordinator.currentUserErrorMessage ?? convexService.lastRecoveryError
     }
 
-    private var shouldShowUsernameSetup: Bool {
-        sessionCoordinator.currentUserLoadState == .loaded && needsUsername == true
+    private var shouldShowOnboarding: Bool {
+        sessionCoordinator.currentUserLoadState == .loaded && needsOnboarding == true
     }
 
     private var shouldShowMainShell: Bool {
-        sessionCoordinator.currentUserLoadState == .loaded && needsUsername == false
+        sessionCoordinator.currentUserLoadState == .loaded && needsOnboarding == false
     }
     
     var body: some View {
@@ -42,16 +42,8 @@ struct RootView: View {
             case .signedOut:
                 LoginView()
             case .signedIn:
-                if shouldShowUsernameSetup {
-                    UsernameSetupView {
-                        Task {
-                            try? await convexService.recoverAuthenticatedSession(
-                                clerk: clerk,
-                                forceTokenRefresh: true,
-                                restartSubscriptions: false
-                            )
-                        }
-                    }
+                if shouldShowOnboarding {
+                    onboardingGate
                     .transition(.move(edge: .trailing))
                 } else {
                     authenticatedContent
@@ -108,6 +100,20 @@ struct RootView: View {
     private var launchHoldScreen: some View {
         Color.black
             .ignoresSafeArea()
+    }
+
+    private var onboardingGate: some View {
+        OnboardingFlowView(
+            onClose: {},
+            startsAtProfileSetup: true,
+            currentUser: sessionCoordinator.currentUser
+        ) {
+            try await convexService.recoverAuthenticatedSession(
+                clerk: clerk,
+                forceTokenRefresh: true,
+                restartSubscriptions: false
+            )
+        }
     }
 
     private func authRecoveryView(message: String) -> some View {

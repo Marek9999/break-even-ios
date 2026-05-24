@@ -9,9 +9,15 @@
 //
 
 import SwiftUI
+import Clerk
+import ConvexMobile
 
 struct OnboardingFlowView: View {
+    @Environment(\.clerk) private var clerk
+    @Environment(\.convexService) private var convexService
+
     let onClose: () -> Void
+    let onComplete: () async throws -> Void
 
     fileprivate enum Step: Hashable {
         case welcome
@@ -31,6 +37,13 @@ struct OnboardingFlowView: View {
         let activeWidth: CGFloat
     }
 
+    private struct CompletionResponse: Decodable {
+        let success: Bool
+        let username: String
+        let onboardingCompletedAt: Double
+        let onboardingVersion: Double
+    }
+
     /// Titles for the four post-welcome onboarding steps. Index 0 is the
     /// currently expanded pill on the "About You" screen, etc.
     private static let pageSteps: [PageStep] = [
@@ -39,10 +52,13 @@ struct OnboardingFlowView: View {
         PageStep(title: "Split methods", activeWidth: 118),
         PageStep(title: "Settle bills", activeWidth: 104)
     ]
+    private static let onboardingVersion: Double = 1
 
     @State private var step: Step = .welcome
     @State private var bottomBarProgress: CGFloat = 0
     @State private var navigationDirection: NavigationDirection = .forward
+    @State private var isCompletingOnboarding = false
+    @State private var completionErrorMessage: String?
 
     // State owned by the flow so the About You form survives step changes.
     @State private var aboutYouProfileImage: UIImage?
@@ -67,15 +83,46 @@ struct OnboardingFlowView: View {
     /// its inline error hints into the touched state in response.
     @State private var aboutYouValidationTrigger: Int = 0
 
-    init(onClose: @escaping () -> Void) {
-        self.init(onClose: onClose, initialStep: .welcome)
+    init(
+        onClose: @escaping () -> Void,
+        currentUser: ConvexUser? = nil,
+        onComplete: @escaping () async throws -> Void = {}
+    ) {
+        self.init(
+            onClose: onClose,
+            initialStep: .welcome,
+            currentUser: currentUser,
+            onComplete: onComplete
+        )
     }
 
-    fileprivate init(onClose: @escaping () -> Void, initialStep: Step) {
+    init(
+        onClose: @escaping () -> Void,
+        startsAtProfileSetup: Bool,
+        currentUser: ConvexUser?,
+        onComplete: @escaping () async throws -> Void = {}
+    ) {
+        self.init(
+            onClose: onClose,
+            initialStep: startsAtProfileSetup ? .aboutYou : .welcome,
+            currentUser: currentUser,
+            onComplete: onComplete
+        )
+    }
+
+    fileprivate init(
+        onClose: @escaping () -> Void,
+        initialStep: Step,
+        currentUser: ConvexUser? = nil,
+        onComplete: @escaping () async throws -> Void = {}
+    ) {
         self.onClose = onClose
+        self.onComplete = onComplete
         _step = State(initialValue: initialStep)
         _bottomBarProgress = State(initialValue: Self.initialBottomBarProgress(for: initialStep))
         _aboutYouCanContinue = State(initialValue: initialStep != .aboutYou)
+        _aboutYouName = State(initialValue: currentUser?.name ?? "")
+        _aboutYouUsername = State(initialValue: currentUser?.username ?? "")
     }
 
     var body: some View {
@@ -100,6 +147,11 @@ struct OnboardingFlowView: View {
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .transition(.opacity)
+            }
+
+            if let completionErrorMessage {
+                completionErrorBanner(completionErrorMessage)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             #if DEBUG
@@ -176,7 +228,7 @@ struct OnboardingFlowView: View {
         GeometryReader { proxy in
             let isSplitMethods = step == .splitMethods
             let containerHeight = proxy.size.height * 0.74
-            let topPadding: CGFloat = 78
+            let topPadding: CGFloat = isSplitMethods ? 264 : 168
             let frameScale: CGFloat = isSplitMethods ? 1.48 : 1
             let yOffset: CGFloat = isSplitMethods ? -280 : 0
 
@@ -306,8 +358,11 @@ struct OnboardingFlowView: View {
     private func onboardingCTAButton(progress: CGFloat, width: CGFloat) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            if step == .aboutYou {
+            if isCompletingOnboarding {
+                return
+            } else if step == .aboutYou {
                 if aboutYouCanContinue {
+                    completionErrorMessage = nil
                     advance(to: .scanReceipt)
                 } else {
                     // Tell About You to surface its inline hints.
@@ -318,11 +373,13 @@ struct OnboardingFlowView: View {
             } else if step == .splitMethods {
                 advance(to: .settleBills)
             } else {
-                onClose()
+                Task {
+                    await completeOnboarding()
+                }
             }
         } label: {
             ZStack {
-                Text("See how to scan a receipt next")
+                Text("Scan a receipt")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.black)
                     .lineLimit(1)
@@ -330,7 +387,7 @@ struct OnboardingFlowView: View {
                     .opacity(1 - Double(progress))
                     .blur(radius: 8 * progress)
 
-                Text("See the split methods")
+                Text("Pick your split")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.black)
                     .lineLimit(1)
@@ -338,7 +395,7 @@ struct OnboardingFlowView: View {
                     .opacity(step == .scanReceipt ? Double(progress) : 0)
                     .blur(radius: step == .scanReceipt ? 8 * (1 - progress) : 8)
 
-                Text("See how to settle bills")
+                Text("Settle it up")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.black)
                     .lineLimit(1)
@@ -346,13 +403,17 @@ struct OnboardingFlowView: View {
                     .opacity(step == .splitMethods ? 1 : 0)
                     .blur(radius: step == .splitMethods ? 0 : 8)
 
-                Text("Start splitting!")
+                Text("Let's split!")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.black)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                    .opacity(step == .settleBills ? 1 : 0)
+                    .opacity(step == .settleBills && !isCompletingOnboarding ? 1 : 0)
                     .blur(radius: step == .settleBills ? 0 : 8)
+
+                ProgressView()
+                    .tint(.black)
+                    .opacity(step == .settleBills && isCompletingOnboarding ? 1 : 0)
             }
             .frame(width: width, height: 52)
             .contentShape(Capsule())
@@ -362,6 +423,36 @@ struct OnboardingFlowView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(isCompletingOnboarding)
+    }
+
+    private func completeOnboarding() async {
+        guard !isCompletingOnboarding else { return }
+        guard let clerkId = clerk.user?.id else {
+            completionErrorMessage = "We lost your session. Please sign in again."
+            return
+        }
+
+        isCompletingOnboarding = true
+        completionErrorMessage = nil
+        defer { isCompletingOnboarding = false }
+
+        do {
+            let _: CompletionResponse = try await convexService.client.mutation(
+                "users:completeOnboarding",
+                with: [
+                    "clerkId": clerkId,
+                    "name": aboutYouName.trimmingCharacters(in: .whitespaces),
+                    "username": aboutYouUsername.lowercased().trimmingCharacters(in: .whitespaces),
+                    "onboardingVersion": Self.onboardingVersion,
+                ] as [String: (any ConvexEncodable)?]
+            )
+
+            try await onComplete()
+            onClose()
+        } catch {
+            completionErrorMessage = error.localizedDescription
+        }
     }
 
     private func onboardingBackButton(progress: CGFloat) -> some View {
@@ -385,6 +476,28 @@ struct OnboardingFlowView: View {
         .opacity(Double(progress))
         .allowsHitTesting(progress > 0.95)
         .accessibilityLabel("Back")
+    }
+
+    private func completionErrorBanner(_ message: String) -> some View {
+        VStack {
+            Text(message)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.red.opacity(0.85), in: .rect(cornerRadius: 14))
+                .padding(.horizontal, 24)
+                .padding(.top, 58)
+                .onTapGesture {
+                    withAnimation {
+                        completionErrorMessage = nil
+                    }
+                }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Page Indicator

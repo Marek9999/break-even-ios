@@ -20,6 +20,8 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     private let _defaultCurrency: String?
     let username: String?
     let usernameChangedAt: Double?
+    let onboardingCompletedAt: Double?
+    let onboardingVersion: Double?
     let createdAt: Double
     
     var id: String { _id }
@@ -27,6 +29,11 @@ struct ConvexUser: Codable, Identifiable, Hashable {
     /// User's default currency (defaults to USD if not set)
     var defaultCurrency: String {
         _defaultCurrency ?? "USD"
+    }
+
+    /// Server-backed onboarding gate. Missing means this user still needs onboarding.
+    var hasCompletedOnboarding: Bool {
+        onboardingCompletedAt != nil
     }
     
     /// Formatted username with @ prefix
@@ -45,6 +52,8 @@ struct ConvexUser: Codable, Identifiable, Hashable {
         case _defaultCurrency = "defaultCurrency"
         case username
         case usernameChangedAt
+        case onboardingCompletedAt
+        case onboardingVersion
         case createdAt
     }
     

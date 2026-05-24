@@ -14,6 +14,7 @@ struct OnboardingWelcomeView: View {
     var onAppleTap: () -> Void = {}
     var onGoogleTap: () -> Void = {}
 
+    @State private var bubbles = OnboardingWelcomeView.makeSampleBubbles()
     @State private var showText = false
     @State private var showGradient = false
 
@@ -40,8 +41,6 @@ struct OnboardingWelcomeView: View {
         config.blurReach = 2.500
         return config
     }()
-
-    private let bubbles: [BuoyancyPhysicsEngine.BubbleSpec] = OnboardingWelcomeView.makeSampleBubbles()
 
     var body: some View {
         ZStack {
@@ -102,7 +101,7 @@ struct OnboardingWelcomeView: View {
     // MARK: - Tagline
 
     private var tagline: some View {
-        Text("Let the app do the maths,\nyou enjoy the drinks")
+        Text("Let the app do the maths.\nYou enjoy the drinks.")
             .font(.title)
             .fontWeight(.bold)
             .foregroundStyle(.white)

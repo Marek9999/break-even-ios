@@ -326,12 +326,114 @@ export const setUsername = mutation({
 });
 
 /**
+ * Save required onboarding profile fields and mark onboarding complete.
+ * This is the authoritative per-user gate for entering the signed-in app.
+ */
+export const completeOnboarding = mutation({
+  args: {
+    clerkId: v.string(),
+    name: v.string(),
+    username: v.string(),
+    onboardingVersion: v.optional(v.number()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    username: v.string(),
+    onboardingCompletedAt: v.number(),
+    onboardingVersion: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+    const name = args.name.trim();
+    const username = args.username.toLowerCase().trim();
+    const onboardingVersion = args.onboardingVersion ?? 1;
+
+    if (name.length === 0) {
+      throw new Error("Name is required");
+    }
+
+    if (username.length < 3 || username.length > 20) {
+      throw new Error("Username must be between 3 and 20 characters");
+    }
+
+    if (!/^[a-z0-9_]+$/.test(username)) {
+      throw new Error(
+        "Username can only contain lowercase letters, numbers, and underscores"
+      );
+    }
+
+    if (
+      user.username &&
+      user.username !== username &&
+      user.usernameChangedAt
+    ) {
+      const hoursSinceLastChange =
+        (Date.now() - user.usernameChangedAt) / (1000 * 60 * 60);
+      if (hoursSinceLastChange < 48) {
+        const hoursRemaining = Math.ceil(48 - hoursSinceLastChange);
+        throw new Error(
+          `You can change your username again in ${hoursRemaining} hour${hoursRemaining === 1 ? "" : "s"}`
+        );
+      }
+    }
+
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_username", (q) => q.eq("username", username))
+      .unique();
+
+    if (existing && existing._id !== user._id) {
+      throw new Error("This username is already taken");
+    }
+
+    const now = Date.now();
+    const usernameChangedAt =
+      user.username === username && user.usernameChangedAt
+        ? user.usernameChangedAt
+        : now;
+
+    await ctx.db.patch(user._id, {
+      name,
+      username,
+      usernameChangedAt,
+      onboardingCompletedAt: now,
+      onboardingVersion,
+    });
+
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (selfFriend && selfFriend.name !== name) {
+      await ctx.db.patch(selfFriend._id, { name });
+    }
+
+    await propagateProfileToLinkedFriends(ctx, user._id, { name });
+
+    return {
+      success: true,
+      username,
+      onboardingCompletedAt: now,
+      onboardingVersion,
+    };
+  },
+});
+
+/**
  * Check if a username is available (real-time availability for the UI).
  */
 export const checkUsernameAvailable = query({
   args: {
     username: v.string(),
+    clerkId: v.optional(v.string()),
   },
+  returns: v.object({
+    available: v.boolean(),
+    reason: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, args) => {
     const username = args.username.toLowerCase().trim();
 
@@ -352,6 +454,13 @@ export const checkUsernameAvailable = query({
       .unique();
 
     if (existing) {
+      if (args.clerkId) {
+        const currentUser = await requireAuthenticatedUser(ctx, args.clerkId);
+        if (existing._id === currentUser._id) {
+          return { available: true, reason: null };
+        }
+      }
+
       return { available: false, reason: "Already taken" };
     }
 

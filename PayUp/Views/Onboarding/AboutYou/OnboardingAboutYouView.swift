@@ -44,6 +44,7 @@ struct OnboardingAboutYouView: View {
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var hasScrolledContent = false
 
     // Emoji pill animation
     @State private var currentEmojiPreview: String = "😀"
@@ -102,33 +103,31 @@ struct OnboardingAboutYouView: View {
                 ScrollViewReader { scrollProxy in
                     ScrollView {
                         VStack(spacing: 28) {
+                            topTitle
                             profileSection
                             photoActionPills
                             formSection
                         }
                         .padding(.horizontal, 24)
-                        .padding(.top, 64)
+                        .padding(.top, 22)
                         .padding(.bottom, 280)
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .mask(onboardingScrollTopFadeMask)
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        geometry.contentOffset.y > 1
+                    } action: { _, isScrolled in
+                        guard hasScrolledContent != isScrolled else { return }
+
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            hasScrolledContent = isScrolled
+                        }
+                    }
                     .onChange(of: focusedField) { _, newValue in
                         scrollToFocusedField(newValue, proxy: scrollProxy)
                     }
                 }
             }
-
-            // Title is pinned to the bottom of the screen and intentionally
-            // ignores the keyboard inset so it stays put as the user starts
-            // typing. Only the continue button rides up with the keyboard.
-            VStack {
-                Spacer()
-                bottomTitle
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 130)
-            }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .allowsHitTesting(false)
 
             // The continue button has been hoisted to OnboardingFlowView
             // so it can morph (via Liquid Glass) into a back + continue
@@ -519,16 +518,21 @@ struct OnboardingAboutYouView: View {
         }
     }
 
+    @ViewBuilder
     private var onboardingScrollTopFadeMask: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.08),
-                .init(color: .black, location: 1)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        if hasScrolledContent {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.08),
+                    .init(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            Color.black
+        }
     }
 
     private func inlineHint(text: String, color: Color) -> some View {
@@ -583,12 +587,11 @@ struct OnboardingAboutYouView: View {
         return nil
     }
 
-    // MARK: - Bottom Section
+    // MARK: - Title
 
-    /// Title is now part of the scroll content so it stays in place when
-    /// the keyboard appears; only the button below it tracks the keyboard.
-    private var bottomTitle: some View {
-        Text("Add your details so your friends know it's you.")
+    /// Title lives below the shared onboarding pills and above the page content.
+    private var topTitle: some View {
+        Text("Add your name so friends know it's you.")
             .font(.title)
             .fontWeight(.bold)
             .foregroundStyle(.white)
@@ -659,9 +662,17 @@ struct OnboardingAboutYouView: View {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
 
+            var args: [String: (any ConvexEncodable)?] = [
+                "username": trimmedUsername
+            ]
+
+            if let clerkId = clerk.user?.id {
+                args["clerkId"] = clerkId
+            }
+
             let subscription = convexService.client.subscribe(
                 to: "users:checkUsernameAvailable",
-                with: ["username": trimmedUsername],
+                with: args,
                 yielding: UsernameAvailabilityResponse.self
             )
             .replaceError(

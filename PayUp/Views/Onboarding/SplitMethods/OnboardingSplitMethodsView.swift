@@ -10,44 +10,84 @@ import SwiftUI
 
 struct OnboardingSplitMethodsView: View {
     @Binding var selectedMethod: NewSplitMethod
+    @State private var swipeHintOffset: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .top) {
             Color.homeSectionBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
                 // Reserves room for the shared page indicator from
                 // OnboardingFlowView.
                 Color.clear.frame(height: 44)
 
-                Spacer(minLength: 0)
-            }
+                topTitle
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 4)
 
-            VStack {
-                Spacer()
                 SplitMethodSelector(selectedMethod: $selectedMethod)
                     .frame(height: 64)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
 
-                bottomTitle
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 130)
+                swipeHint
+                    .padding(.top, 2)
+
+                Spacer(minLength: 0)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .preferredColorScheme(.dark)
     }
 
-    // MARK: - Bottom Title
+    // MARK: - Title
 
-    private var bottomTitle: some View {
-        Text("Swipe between the split methods that work for you")
+    private var topTitle: some View {
+        Text("Pick the split that fits the chaos.")
             .font(.title)
             .fontWeight(.bold)
             .foregroundStyle(.white)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var swipeHint: some View {
+        Text("Try swiping here")
+            .font(.subheadline)
+            .foregroundStyle(Color.text.opacity(0.6))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .offset(x: swipeHintOffset)
+            .task { await runSwipeHintAnimation() }
+    }
+
+    @MainActor
+    private func runSwipeHintAnimation() async {
+        while !Task.isCancelled {
+            await rubberBandHint(toward: 14)
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+
+            await rubberBandHint(toward: -14)
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+
+    @MainActor
+    private func rubberBandHint(toward offset: CGFloat) async {
+        let rebound = offset * 0.45
+        let steps: [(CGFloat, TimeInterval)] = [
+            (offset, 0.3),
+            (rebound, 0.24),
+            (offset, 0.26),
+            (0, 0.42)
+        ]
+
+        for (targetOffset, duration) in steps {
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: duration)) {
+                swipeHintOffset = targetOffset
+            }
+            try? await Task.sleep(for: .seconds(duration))
+        }
     }
 }
 
