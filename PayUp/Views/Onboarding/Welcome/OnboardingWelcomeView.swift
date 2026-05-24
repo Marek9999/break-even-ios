@@ -191,6 +191,7 @@ struct OnboardingWelcomeView: View {
             radius: appIconSide / 2,
             color: .white.opacity(0.001),
             shape: .roundedRect(side: appIconSide, cornerRadius: 22),
+            imageName: "onboardingIcon",
             // Lock between the bubble cluster on top and the tagline below,
             // aimed a bit above center and pinned horizontally to the middle.
             relativeTargetY: 0.38,

@@ -18,21 +18,21 @@
 			containerPortal = 81238DFC2F0079D600D19591 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 81238E032F0079D600D19591;
-			remoteInfo = "PayUp";
+			remoteInfo = PayUp;
 		};
 		81238E1C2F0079D700D19591 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 81238DFC2F0079D600D19591 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 81238E032F0079D600D19591;
-			remoteInfo = "PayUp";
+			remoteInfo = PayUp;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		81238E042F0079D600D19591 /* PayUp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PayUp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		81238E112F0079D700D19591 /* PayUpTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "PayUpTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		81238E1B2F0079D700D19591 /* PayUpUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "PayUpUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		81238E042F0079D600D19591 /* PayUp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PayUp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		81238E112F0079D700D19591 /* PayUpTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PayUpTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		81238E1B2F0079D700D19591 /* PayUpUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PayUpUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -52,17 +52,17 @@
 			exceptions = (
 				816B810A2F8C474C0053D0BF /* Exceptions for "PayUp" folder in "PayUp" target */,
 			);
-			path = "PayUp";
+			path = PayUp;
 			sourceTree = "<group>";
 		};
 		81238E142F0079D700D19591 /* PayUpTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "PayUpTests";
+			path = PayUpTests;
 			sourceTree = "<group>";
 		};
 		81238E1E2F0079D700D19591 /* PayUpUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "PayUpUITests";
+			path = PayUpUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -141,13 +141,13 @@
 			fileSystemSynchronizedGroups = (
 				81238E062F0079D600D19591 /* PayUp */,
 			);
-			name = "PayUp";
+			name = PayUp;
 			packageProductDependencies = (
 				818C4C032F1D437400647D3D /* Clerk */,
 				818C4C112F1D796200647D3D /* ConvexMobile */,
 				81A000022F9D5B1200A00001 /* Glur */,
 			);
-			productName = "PayUp";
+			productName = PayUp;
 			productReference = 81238E042F0079D600D19591 /* PayUp.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -167,10 +167,10 @@
 			fileSystemSynchronizedGroups = (
 				81238E142F0079D700D19591 /* PayUpTests */,
 			);
-			name = "PayUpTests";
+			name = PayUpTests;
 			packageProductDependencies = (
 			);
-			productName = "PayUpTests";
+			productName = PayUpTests;
 			productReference = 81238E112F0079D700D19591 /* PayUpTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
@@ -190,10 +190,10 @@
 			fileSystemSynchronizedGroups = (
 				81238E1E2F0079D700D19591 /* PayUpUITests */,
 			);
-			name = "PayUpUITests";
+			name = PayUpUITests;
 			packageProductDependencies = (
 			);
-			productName = "PayUpUITests";
+			productName = PayUpUITests;
 			productReference = 81238E1B2F0079D700D19591 /* PayUpUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
@@ -440,15 +440,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "PayUp/PayUp.entitlements";
+				CODE_SIGN_ENTITLEMENTS = PayUp/PayUp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6RMC48P7BD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_CFBundleDisplayName = PayUp;
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_CFBundleName = PayUp;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PayUp needs camera access to scan receipts for expense splitting.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "PayUp needs permission to save receipt images to your photo library.";
@@ -463,7 +463,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup;
 				PRODUCT_MODULE_NAME = PayUp;
 				PRODUCT_NAME = PayUp;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -483,15 +483,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "PayUp/PayUp.entitlements";
+				CODE_SIGN_ENTITLEMENTS = PayUp/PayUp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6RMC48P7BD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_CFBundleDisplayName = PayUp;
+				INFOPLIST_KEY_CFBundleIconName = AppIcon;
 				INFOPLIST_KEY_CFBundleName = PayUp;
 				INFOPLIST_KEY_NSCameraUsageDescription = "PayUp needs camera access to scan receipts for expense splitting.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "PayUp needs permission to save receipt images to your photo library.";
@@ -506,7 +506,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup;
 				PRODUCT_MODULE_NAME = PayUp;
 				PRODUCT_NAME = PayUp;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -530,7 +530,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup.tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -553,7 +553,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup.tests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -574,7 +574,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup.uitests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -582,7 +582,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = "PayUp";
+				TEST_TARGET_NAME = PayUp;
 			};
 			name = Debug;
 		};
@@ -595,7 +595,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.rudradsigns.payup.uitests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.rudradsigns.payup.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -603,7 +603,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = "PayUp";
+				TEST_TARGET_NAME = PayUp;
 			};
 			name = Release;
 		};

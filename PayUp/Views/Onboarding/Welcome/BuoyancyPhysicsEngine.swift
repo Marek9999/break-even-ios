@@ -33,6 +33,9 @@ final class BuoyancyPhysicsEngine {
         /// solid color fill; a softly blurred copy is layered behind the crisp
         /// emoji to add depth.
         var emoji: String? = nil
+        /// Optional asset image rendered inside the bubble. When set, it takes
+        /// precedence over `emoji` and fills the bubble's visual shape.
+        var imageName: String? = nil
         /// Optional rest target as a fraction of container height (0 = top,
         /// 1 = bottom). When set, the particle is pulled toward this Y with
         /// a spring force instead of receiving upward buoyancy, so it locks

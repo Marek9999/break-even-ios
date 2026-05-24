@@ -136,6 +136,8 @@ private struct BuoyantBubbleView: View {
     /// Roughly mirrors how long it takes the high initial launch velocity
     /// to decay back to the steady buoyancy cruise speed.
     private let launchBounceDuration: Double = 0.7
+    private let onboardingIconTopColorStop: CGFloat = 0.0
+    private let onboardingIconBottomColorStop: CGFloat = 0.67
 
     var body: some View {
         bubbleShape
@@ -154,7 +156,13 @@ private struct BuoyantBubbleView: View {
         switch spec.shape {
         case .circle:
             ZStack {
-                if let emoji = spec.emoji {
+                if let imageName = spec.imageName {
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: spec.radius * 2, height: spec.radius * 2)
+                        .clipShape(Circle())
+                } else if let emoji = spec.emoji {
                     emojiContent(emoji, sizeBase: spec.radius * 2)
                 } else {
                     Circle()
@@ -166,21 +174,55 @@ private struct BuoyantBubbleView: View {
             .glassEffect(.regular.interactive(), in: Circle())
 
         case let .roundedRect(side, cornerRadius):
-            ZStack {
-                if let emoji = spec.emoji {
-                    emojiContent(emoji, sizeBase: side)
-                } else {
+            if let imageName = spec.imageName {
+                ZStack {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(spec.color)
+                        .fill(onboardingIconBackgroundGradient)
+                    Image(imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: side, height: side)
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 }
+                .frame(width: side, height: side)
+                .glassEffect(
+                    .regular.interactive(),
+                    in: .rect(cornerRadius: cornerRadius, style: .continuous)
+                )
+            } else {
+                ZStack {
+                    if let emoji = spec.emoji {
+                        emojiContent(emoji, sizeBase: side)
+                    } else {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(spec.color)
+                    }
+                }
+                .frame(width: side, height: side)
+                .padding(2)
+                .glassEffect(
+                    .regular.interactive(),
+                    in: .rect(cornerRadius: cornerRadius, style: .continuous)
+                )
             }
-            .frame(width: side, height: side)
-            .padding(2)
-            .glassEffect(
-                .regular.interactive(),
-                in: .rect(cornerRadius: cornerRadius, style: .continuous)
-            )
         }
+    }
+
+    private var onboardingIconBackgroundGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(
+                    color: Color(red: 151 / 255, green: 151 / 255, blue: 248 / 255, opacity: 0.95),
+                    location: onboardingIconTopColorStop
+                ),
+                .init(
+                    color: Color(red: 90 / 255, green: 90 / 255, blue: 1.0, opacity: 0.95),
+                    location: onboardingIconBottomColorStop
+                )
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     /// Renders a soft blurred copy of the emoji behind a crisp foreground
