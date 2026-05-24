@@ -1,7 +1,7 @@
 {
-  "name": "break-even-ios",
+  "name": "payup-ios",
   "version": "1.0.0",
-  "description": "Convex backend for Break Even iOS app",
+  "description": "Convex backend for PayUp iOS app",
   "private": true,
   "scripts": {
     "dev": "convex dev",
@@ -11,6 +11,7 @@
     "convex": "^1.17.0"
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "typescript": "^5.0.0"
   }
 }

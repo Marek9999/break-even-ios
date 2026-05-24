@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 
 // Standard exchange rates snapshot for seed data (rates relative to USD)
@@ -1111,7 +1112,7 @@ async function collectResetCounts(ctx: any) {
     invitations: invitations.length,
     activities: activities.length,
     transactionParticipants: transactionParticipants.length,
-    receiptFiles: transactions.filter((transaction) => transaction.receiptFileId).length,
+    receiptFiles: transactions.filter((transaction: Doc<"transactions">) => transaction.receiptFileId).length,
   };
 }
 
