@@ -459,16 +459,31 @@ struct CameraPreviewView: UIViewControllerRepresentable {
     @Binding var capturedImage: UIImage?
     @Binding var captureTriggered: Bool
     @Binding var flashMode: CameraFlashMode
+    @Binding var cameraPosition: AVCaptureDevice.Position
+
+    init(
+        capturedImage: Binding<UIImage?>,
+        captureTriggered: Binding<Bool>,
+        flashMode: Binding<CameraFlashMode>,
+        cameraPosition: Binding<AVCaptureDevice.Position> = .constant(.back)
+    ) {
+        _capturedImage = capturedImage
+        _captureTriggered = captureTriggered
+        _flashMode = flashMode
+        _cameraPosition = cameraPosition
+    }
     
     func makeUIViewController(context: Context) -> CameraViewController {
         let controller = CameraViewController()
         controller.delegate = context.coordinator
         controller.flashMode = flashMode.avFlashMode
+        controller.cameraPosition = cameraPosition
         return controller
     }
     
     func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {
         uiViewController.flashMode = flashMode.avFlashMode
+        uiViewController.updateCameraPosition(cameraPosition)
         
         if captureTriggered {
             uiViewController.capturePhoto()
@@ -504,10 +519,12 @@ protocol CameraViewControllerDelegate: AnyObject {
 class CameraViewController: UIViewController {
     weak var delegate: CameraViewControllerDelegate?
     var flashMode: AVCaptureDevice.FlashMode = .off
+    var cameraPosition: AVCaptureDevice.Position = .back
     
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var currentInput: AVCaptureDeviceInput?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -523,8 +540,7 @@ class CameraViewController: UIViewController {
         captureSession = AVCaptureSession()
         captureSession?.sessionPreset = .photo
         
-        guard let backCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let input = try? AVCaptureDeviceInput(device: backCamera) else {
+        guard let input = cameraInput(for: cameraPosition) else {
             return
         }
         
@@ -536,6 +552,7 @@ class CameraViewController: UIViewController {
            captureSession.canAddOutput(photoOutput) {
             
             captureSession.addInput(input)
+            currentInput = input
             captureSession.addOutput(photoOutput)
             
             previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
@@ -550,6 +567,38 @@ class CameraViewController: UIViewController {
                 self?.captureSession?.startRunning()
             }
         }
+    }
+
+    func updateCameraPosition(_ position: AVCaptureDevice.Position) {
+        guard position != cameraPosition else { return }
+        guard let captureSession, let newInput = cameraInput(for: position) else { return }
+
+        cameraPosition = position
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+
+            captureSession.beginConfiguration()
+
+            if let currentInput = self.currentInput {
+                captureSession.removeInput(currentInput)
+            }
+
+            if captureSession.canAddInput(newInput) {
+                captureSession.addInput(newInput)
+                self.currentInput = newInput
+            }
+
+            captureSession.commitConfiguration()
+        }
+    }
+
+    private func cameraInput(for position: AVCaptureDevice.Position) -> AVCaptureDeviceInput? {
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+            return nil
+        }
+
+        return try? AVCaptureDeviceInput(device: camera)
     }
     
     func capturePhoto() {

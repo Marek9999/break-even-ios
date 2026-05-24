@@ -10,6 +10,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 import PhotosUI
 
 struct OnboardingProfileCameraView: View {
@@ -20,6 +21,7 @@ struct OnboardingProfileCameraView: View {
     @State private var capturedImage: UIImage?
     @State private var captureTriggered = false
     @State private var flashMode: CameraFlashMode = .off
+    @State private var cameraPosition: AVCaptureDevice.Position = .back
     @State private var showPhotosPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
 
@@ -72,7 +74,8 @@ struct OnboardingProfileCameraView: View {
                     CameraPreviewView(
                         capturedImage: $capturedImage,
                         captureTriggered: $captureTriggered,
-                        flashMode: $flashMode
+                        flashMode: $flashMode,
+                        cameraPosition: $cameraPosition
                     )
                 }
             }
@@ -83,6 +86,13 @@ struct OnboardingProfileCameraView: View {
                     flashButton
                         .padding(14)
                         .transition(.opacity.combined(with: .scale))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if capturedImage == nil {
+                    flipCameraButton
+                        .padding(.bottom, 18)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .animation(.spring(duration: 0.32, bounce: 0.1), value: capturedImage != nil)
@@ -102,6 +112,29 @@ struct OnboardingProfileCameraView: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
+    }
+
+    private var flipCameraButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(duration: 0.28, bounce: 0.12)) {
+                cameraPosition = cameraPosition == .back ? .front : .back
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Text("Flip")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 42)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 
     // MARK: - Bottom Bar
