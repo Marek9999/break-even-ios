@@ -232,7 +232,7 @@ final class ConvexService {
             "clerkId": clerkId,
             "email": email,
             "name": name,
-            "defaultCurrency": "USD"
+            "defaultCurrency": SupportedCurrency.deviceDefault.rawValue
         ]
         
         if let phone = phone, !phone.isEmpty {

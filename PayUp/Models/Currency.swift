@@ -82,6 +82,16 @@ enum SupportedCurrency: String, CaseIterable, Codable, Identifiable {
     static func from(code: String) -> SupportedCurrency? {
         return SupportedCurrency(rawValue: code.uppercased())
     }
+    
+    /// Best-effort default from the device locale, falling back to USD if unsupported.
+    static var deviceDefault: SupportedCurrency {
+        guard let currencyCode = Locale.autoupdatingCurrent.currency?.identifier,
+              let currency = SupportedCurrency.from(code: currencyCode) else {
+            return .USD
+        }
+        
+        return currency
+    }
 }
 
 // MARK: - Exchange Rates Model
