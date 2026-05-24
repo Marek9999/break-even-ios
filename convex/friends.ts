@@ -29,7 +29,23 @@ export const listFriends = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
       .collect();
 
-    return friends;
+    const linkedUsers = new Map<string, { username?: string }>();
+    for (const friend of friends) {
+      if (!friend.linkedUserId) continue;
+      const linkedUser = await ctx.db.get(friend.linkedUserId);
+      if (linkedUser) {
+        linkedUsers.set(friend.linkedUserId.toString(), {
+          username: linkedUser.username,
+        });
+      }
+    }
+
+    return friends.map((friend) => ({
+      ...friend,
+      username: friend.linkedUserId
+        ? linkedUsers.get(friend.linkedUserId.toString())?.username
+        : undefined,
+    }));
   },
 });
 
