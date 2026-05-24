@@ -111,6 +111,20 @@ final class BubblePhysicsEngine {
         // Run simulation for settling
         startSimulation()
     }
+
+    func resetParticle(id: String, radius: CGFloat, in containerSize: CGSize) {
+        let center = CGPoint(x: containerSize.width / 2, y: containerSize.height / 2)
+        centerPoint = center
+        particles = [
+            Particle(
+                id: id,
+                position: center,
+                radius: radius
+            )
+        ]
+        smoothedPositions = [id: center]
+        startSimulation()
+    }
     
     private func resolveOverlaps() {
         let count = particles.count
@@ -614,23 +628,106 @@ struct BubbleButtonStyle: ButtonStyle {
 
 struct BubbleClusterEmptyView: View {
     let isOwedToUser: Bool
+
+    @State private var engine = BubblePhysicsEngine()
+    @State private var containerSize: CGSize = .zero
+
+    private let bubbleID = "empty-state-bubble"
+    private let bubbleSize: CGFloat = 84
+
+    private var emoji: String {
+        isOwedToUser ? "👍" : "👏"
+    }
+
+    private var coordinateSpaceName: String {
+        isOwedToUser ? "owedEmptyBubbleCluster" : "oweEmptyBubbleCluster"
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: isOwedToUser ? "checkmark.circle" : "face.smiling")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            
-            Text(isOwedToUser ? "No one owes you" : "You're all caught up!")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            
-            Text(isOwedToUser ? "Start a split to track who owes you" : "No pending payments")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+        GeometryReader { geometry in
+            ZStack {
+                if let position = engine.position(for: bubbleID) {
+                    EmptyEmojiBubbleView(
+                        id: bubbleID,
+                        emoji: emoji,
+                        size: bubbleSize,
+                        engine: engine,
+                        coordinateSpaceName: coordinateSpaceName
+                    )
+                    .position(position)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .coordinateSpace(name: coordinateSpaceName)
+            .onAppear {
+                containerSize = geometry.size
+                initializePhysics()
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                containerSize = newSize
+                engine.setCenter(CGPoint(x: newSize.width / 2, y: newSize.height / 2))
+                initializePhysics()
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func initializePhysics() {
+        guard containerSize.width > 0 && containerSize.height > 0 else { return }
+        engine.resetParticle(id: bubbleID, radius: bubbleSize / 2, in: containerSize)
+    }
+}
+
+private struct EmptyEmojiBubbleView: View {
+    let id: String
+    let emoji: String
+    let size: CGFloat
+    let engine: BubblePhysicsEngine
+    let coordinateSpaceName: String
+
+    @State private var isDragging = false
+    @State private var hasStartedDrag = false
+
+    var body: some View {
+        bubbleContent
+            .scaleEffect(isDragging ? 1.05 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
+            .gesture(dragGesture)
+    }
+
+    private var bubbleContent: some View {
+        ZStack {
+            Text(emoji)
+                .font(.system(size: size * 0.52))
+                .blur(radius: size * 0.12)
+                .opacity(0.25)
+                .accessibilityHidden(true)
+
+            Text(emoji)
+                .font(.system(size: size * 0.52))
+        }
+        .frame(width: size, height: size)
+        .padding(2)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityHidden(true)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named(coordinateSpaceName))
+            .onChanged { value in
+                if !hasStartedDrag {
+                    hasStartedDrag = true
+                    isDragging = true
+                    engine.startDrag(id: id, to: value.location)
+                } else {
+                    engine.updateDrag(id: id, to: value.location)
+                }
+            }
+            .onEnded { _ in
+                isDragging = false
+                hasStartedDrag = false
+                engine.endDrag(id: id)
+            }
     }
 }
 

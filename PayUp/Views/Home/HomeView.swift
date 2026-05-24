@@ -695,12 +695,18 @@ struct HomeView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(1)
                 
-                balanceInfo(title: "Owed to you", amount: viewModel.totalOwedToMe)
+                balanceInfo(
+                    title: viewModel.owedToMe.isEmpty ? "No one owes you!" : "Owed to you",
+                    amount: viewModel.totalOwedToMe,
+                    showsAmount: !viewModel.owedToMe.isEmpty
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 44)
                     .padding(.top, 4)
                     .padding(.bottom, 42)
+                    .zIndex(0)
             }
             .opacity(isInlineModePresented ? 0 : 1 - Double(historyPanelContentProgress))
             .blur(radius: isInlineModePresented ? 12 : 12 * historyPanelContentProgress)
@@ -1031,7 +1037,11 @@ struct HomeView: View {
             shape.fill(sectionBackground)
             
             VStack(spacing: 0) {
-                balanceInfo(title: "You owe", amount: viewModel.totalIOwe)
+                balanceInfo(
+                    title: viewModel.iOwe.isEmpty ? "You owe no one!" : "You owe",
+                    amount: viewModel.totalIOwe,
+                    showsAmount: !viewModel.iOwe.isEmpty
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 44)
                     .padding(.top, 42)
@@ -1057,17 +1067,23 @@ struct HomeView: View {
         .allowsHitTesting(!isInlineModePresented)
     }
     
-    private func balanceInfo(title: String, amount: Double) -> some View {
+    private func balanceInfo(title: String, amount: Double, showsAmount: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            if !showsAmount {
+                Spacer(minLength: 0)
+            }
+
             Text(title)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Color.appText.opacity(0.6))
             
-            Spacer(minLength: 12)
-            
-            Text(amount.asCurrency(code: userCurrency))
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Color.appText)
+            Spacer(minLength: showsAmount ? 12 : 0)
+
+            if showsAmount {
+                Text(amount.asCurrency(code: userCurrency))
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Color.appText)
+            }
         }
     }
     
