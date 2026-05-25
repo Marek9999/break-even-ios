@@ -7,6 +7,8 @@ import {
   requireIdentity,
 } from "./lib/auth";
 
+const ACCOUNT_DELETION_CONFIRMATION = "DELETE_MY_PAYUP_ACCOUNT";
+
 /**
  * Propagate profile changes to all friend records that reference this user.
  * Uses the by_linkedUser index for efficient lookup. Only patches records
@@ -493,6 +495,244 @@ export const getUserByUsername = query({
       username: user.username,
       avatarUrl: user.avatarUrl,
     };
+  },
+});
+
+/**
+ * Permanently delete the authenticated user's PayUp account data.
+ *
+ * This removes the user's profile, owned friend records, created transactions,
+ * receipt files, splits, settlements, invites, notification devices, activity
+ * records, and transaction participant rows. Other users' friend records that
+ * pointed at this user are anonymized so no profile details remain.
+ */
+export const deleteAccount = mutation({
+  args: {
+    clerkId: v.string(),
+    confirmationText: v.string(),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    deleted: v.object({
+      user: v.number(),
+      notificationDevices: v.number(),
+      activities: v.number(),
+      transactionParticipants: v.number(),
+      invitations: v.number(),
+      settlements: v.number(),
+      splits: v.number(),
+      transactions: v.number(),
+      friends: v.number(),
+      receiptFiles: v.number(),
+      anonymizedFriendRecords: v.number(),
+    }),
+  }),
+  handler: async (ctx, args) => {
+    if (args.confirmationText !== ACCOUNT_DELETION_CONFIRMATION) {
+      throw new Error("Account deletion confirmation did not match");
+    }
+
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+    const deleted = {
+      user: 0,
+      notificationDevices: 0,
+      activities: 0,
+      transactionParticipants: 0,
+      invitations: 0,
+      settlements: 0,
+      splits: 0,
+      transactions: 0,
+      friends: 0,
+      receiptFiles: 0,
+      anonymizedFriendRecords: 0,
+    };
+
+    const deleteDocument = async (id: Id<any>) => {
+      await ctx.db.delete(id);
+      return 1;
+    };
+    const deletedSettlementIds = new Set<Id<"settlements">>();
+    const deletedParticipantIds = new Set<Id<"transactionParticipants">>();
+
+    const notificationDevices = await ctx.db
+      .query("notificationDevices")
+      .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+      .collect();
+    for (const device of notificationDevices) {
+      deleted.notificationDevices += await deleteDocument(device._id);
+    }
+
+    const userActivities = await ctx.db
+      .query("activities")
+      .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+      .collect();
+    const actorActivities = (await ctx.db.query("activities").collect()).filter(
+      (activity: { _id: Id<"activities">; actorId: Id<"users"> }) =>
+        activity.actorId === user._id &&
+        !userActivities.some((userActivity) => userActivity._id === activity._id)
+    );
+    for (const activity of [...userActivities, ...actorActivities]) {
+      deleted.activities += await deleteDocument(activity._id);
+    }
+
+    const participantRows = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+      .collect();
+
+    const ownedFriends = await ctx.db
+      .query("friends")
+      .withIndex("by_owner", (q: any) => q.eq("ownerId", user._id))
+      .collect();
+    const ownedFriendIds = new Set(ownedFriends.map((friend) => friend._id));
+
+    const linkedFriendRecords = await ctx.db
+      .query("friends")
+      .withIndex("by_linkedUser", (q: any) => q.eq("linkedUserId", user._id))
+      .collect();
+
+    const transactionIdsToDelete = new Set<Id<"transactions">>();
+    const createdTransactions = await ctx.db
+      .query("transactions")
+      .withIndex("by_creator", (q: any) => q.eq("createdById", user._id))
+      .collect();
+    for (const transaction of createdTransactions) {
+      transactionIdsToDelete.add(transaction._id);
+    }
+
+    for (const friend of ownedFriends) {
+      const paidTransactions = await ctx.db
+        .query("transactions")
+        .withIndex("by_paidBy", (q: any) => q.eq("paidById", friend._id))
+        .collect();
+      for (const transaction of paidTransactions) {
+        transactionIdsToDelete.add(transaction._id);
+      }
+
+      const friendSettlements = await ctx.db
+        .query("settlements")
+        .withIndex("by_friend", (q: any) => q.eq("friendId", friend._id))
+        .collect();
+      for (const settlement of friendSettlements) {
+        if (!deletedSettlementIds.has(settlement._id)) {
+          deletedSettlementIds.add(settlement._id);
+          deleted.settlements += await deleteDocument(settlement._id);
+        }
+      }
+    }
+
+    const createdSettlements = await ctx.db
+      .query("settlements")
+      .withIndex("by_creator", (q: any) => q.eq("createdById", user._id))
+      .collect();
+    for (const settlement of createdSettlements) {
+      if (!deletedSettlementIds.has(settlement._id)) {
+        deletedSettlementIds.add(settlement._id);
+        deleted.settlements += await deleteDocument(settlement._id);
+      }
+    }
+
+    for (const transactionId of transactionIdsToDelete) {
+      const splits = await ctx.db
+        .query("splits")
+        .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
+        .collect();
+      for (const split of splits) {
+        deleted.splits += await deleteDocument(split._id);
+      }
+
+      const participants = await ctx.db
+        .query("transactionParticipants")
+        .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
+        .collect();
+      for (const participant of participants) {
+        if (!deletedParticipantIds.has(participant._id)) {
+          deletedParticipantIds.add(participant._id);
+          deleted.transactionParticipants += await deleteDocument(participant._id);
+        }
+      }
+
+      const transaction = await ctx.db.get(transactionId);
+      if (transaction) {
+        if (transaction.receiptFileId) {
+          try {
+            await ctx.storage.delete(transaction.receiptFileId);
+            deleted.receiptFiles += 1;
+          } catch {
+            // Continue account deletion if a receipt blob is already missing.
+          }
+        }
+        deleted.transactions += await deleteDocument(transaction._id);
+      }
+    }
+
+    for (const participant of participantRows) {
+      if (!deletedParticipantIds.has(participant._id)) {
+        deletedParticipantIds.add(participant._id);
+        deleted.transactionParticipants += await deleteDocument(participant._id);
+      }
+    }
+
+    const sentInvitations = await ctx.db
+      .query("invitations")
+      .withIndex("by_sender", (q: any) => q.eq("senderId", user._id))
+      .collect();
+    const invitationsByFriend = [];
+    for (const friend of ownedFriends) {
+      const friendInvitations = await ctx.db
+        .query("invitations")
+        .withIndex("by_friend", (q: any) => q.eq("friendId", friend._id))
+        .collect();
+      invitationsByFriend.push(...friendInvitations);
+    }
+    const invitationsByEmail = user.email
+      ? await ctx.db
+          .query("invitations")
+          .withIndex("by_recipient_email", (q: any) => q.eq("recipientEmail", user.email))
+          .collect()
+      : [];
+    const invitationsByPhone = user.phone
+      ? await ctx.db
+          .query("invitations")
+          .withIndex("by_recipient_phone", (q: any) => q.eq("recipientPhone", user.phone))
+          .collect()
+      : [];
+    const invitationIds = new Set<Id<"invitations">>();
+    for (const invitation of [
+      ...sentInvitations,
+      ...invitationsByFriend,
+      ...invitationsByEmail,
+      ...invitationsByPhone,
+    ]) {
+      if (!invitationIds.has(invitation._id)) {
+        invitationIds.add(invitation._id);
+        deleted.invitations += await deleteDocument(invitation._id);
+      }
+    }
+
+    for (const friend of linkedFriendRecords) {
+      if (ownedFriendIds.has(friend._id)) {
+        continue;
+      }
+
+      await ctx.db.patch(friend._id, {
+        linkedUserId: undefined,
+        name: "Deleted User",
+        email: undefined,
+        phone: undefined,
+        avatarUrl: undefined,
+        inviteStatus: "removed_by_them",
+      });
+      deleted.anonymizedFriendRecords += 1;
+    }
+
+    for (const friend of ownedFriends) {
+      deleted.friends += await deleteDocument(friend._id);
+    }
+
+    deleted.user += await deleteDocument(user._id);
+
+    return { success: true, deleted };
   },
 });
 
