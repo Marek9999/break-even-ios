@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import {
   normalizeEmail,
@@ -499,7 +499,7 @@ export const getUserByUsername = query({
 /**
  * List all users (for development/debugging only)
  */
-export const listAllUsers = query({
+export const listAllUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("users").collect();

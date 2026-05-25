@@ -33,6 +33,7 @@ struct OnboardingAboutYouView: View {
     @Binding var profileHue: Double
     @Binding var isEditingEmoji: Bool
     @Binding var imageDominantColor: Color?
+    @Binding var didChooseCustomProfileImage: Bool
 
     // Form state
     @Binding var name: String
@@ -57,6 +58,11 @@ struct OnboardingAboutYouView: View {
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable { case name, username }
+
+    private enum ProfileImageSource: Equatable {
+        case provider
+        case userSelected
+    }
 
     private static let faceEmojis: [String] = [
         "🦁", "🐧", "🐼", "🐔", "🐮", "🐶", "🐱", "🐭", "🐹", "🐰",
@@ -163,7 +169,7 @@ struct OnboardingAboutYouView: View {
         }
         .fullScreenCover(isPresented: $showCamera) {
             OnboardingProfileCameraView { image in
-                applyProfileImage(image)
+                applyProfileImage(image, source: .userSelected)
             }
         }
         .photosPicker(
@@ -176,7 +182,7 @@ struct OnboardingAboutYouView: View {
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
                    let image = UIImage(data: data) {
-                    await MainActor.run { applyProfileImage(image) }
+                    await MainActor.run { applyProfileImage(image, source: .userSelected) }
                 }
             }
         }
@@ -184,18 +190,21 @@ struct OnboardingAboutYouView: View {
 
     /// Sets a new profile image and updates the top-of-screen tint by
     /// extracting the image's dominant color (mirrors ProfileView).
-    private func applyProfileImage(_ image: UIImage) {
+    private func applyProfileImage(_ image: UIImage, source: ProfileImageSource) {
+        if source == .provider && (didChooseCustomProfileImage || selectedEmoji != nil) {
+            return
+        }
+
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             profileImage = image
             selectedEmoji = nil
             isEditingEmoji = false
+            didChooseCustomProfileImage = source == .userSelected
         }
-        Task.detached(priority: .userInitiated) {
+        Task {
             let color = image.dominantColor()
-            await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.4)) {
-                    imageDominantColor = color
-                }
+            withAnimation(.easeInOut(duration: 0.4)) {
+                imageDominantColor = color
             }
         }
     }
@@ -223,6 +232,7 @@ struct OnboardingAboutYouView: View {
                         profileImage = nil
                         selectedEmoji = nil
                         imageDominantColor = nil
+                        didChooseCustomProfileImage = false
                     }
                 } label: {
                     Image(systemName: "xmark")
@@ -285,6 +295,7 @@ struct OnboardingAboutYouView: View {
                     set: { newValue in
                         selectedEmoji = newValue
                         profileImage = nil
+                        didChooseCustomProfileImage = false
                     }
                 ),
                 circleSize: 84
@@ -380,6 +391,7 @@ struct OnboardingAboutYouView: View {
                     }
                     profileImage = nil
                     imageDominantColor = nil
+                    didChooseCustomProfileImage = false
                     isEditingEmoji = true
                 }
             }
@@ -602,36 +614,37 @@ struct OnboardingAboutYouView: View {
     // MARK: - Hydration
 
     private func hydrateFromClerk() {
-        guard name.isEmpty else { return }
         guard let user = clerk.user else { return }
 
-        let first = user.firstName ?? ""
-        let last = user.lastName ?? ""
-        let fromClerk = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+        if name.isEmpty {
+            let first = user.firstName ?? ""
+            let last = user.lastName ?? ""
+            let fromClerk = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
 
-        if !fromClerk.isEmpty {
-            name = fromClerk
-        } else if let email = user.primaryEmailAddress?.emailAddress {
-            let local: String
-            if let atIndex = email.firstIndex(of: "@") {
-                local = String(email[..<atIndex])
-            } else {
-                local = email
+            if !fromClerk.isEmpty {
+                name = fromClerk
+            } else if let email = user.primaryEmailAddress?.emailAddress {
+                let local: String
+                if let atIndex = email.firstIndex(of: "@") {
+                    local = String(email[..<atIndex])
+                } else {
+                    local = email
+                }
+                let cleaned = local
+                    .replacingOccurrences(of: ".", with: " ")
+                    .replacingOccurrences(of: "_", with: " ")
+                    .replacingOccurrences(of: "-", with: " ")
+                name = cleaned
+                    .split(separator: " ")
+                    .map { $0.capitalized }
+                    .joined(separator: " ")
             }
-            let cleaned = local
-                .replacingOccurrences(of: ".", with: " ")
-                .replacingOccurrences(of: "_", with: " ")
-                .replacingOccurrences(of: "-", with: " ")
-            name = cleaned
-                .split(separator: " ")
-                .map { $0.capitalized }
-                .joined(separator: " ")
+            // Skip the touched-side-effects since this is a programmatic hydration.
+            nameTouched = false
         }
-        // Skip the touched-side-effects since this is a programmatic hydration.
-        nameTouched = false
 
         let urlString = user.imageUrl
-        if !urlString.isEmpty, let url = URL(string: urlString) {
+        if profileImage == nil, selectedEmoji == nil, !urlString.isEmpty, let url = URL(string: urlString) {
             Task { await loadProfileImage(from: url) }
         }
     }
@@ -640,7 +653,7 @@ struct OnboardingAboutYouView: View {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = UIImage(data: data) {
-                await MainActor.run { applyProfileImage(image) }
+                await MainActor.run { applyProfileImage(image, source: .provider) }
             }
         } catch {
             // Ignore – the user can pick a photo manually.
@@ -700,6 +713,7 @@ struct OnboardingAboutYouView: View {
         profileHue: .constant(0.571),
         isEditingEmoji: .constant(false),
         imageDominantColor: .constant(nil),
+        didChooseCustomProfileImage: .constant(false),
         name: .constant(""),
         username: .constant(""),
         nameTouched: .constant(false),

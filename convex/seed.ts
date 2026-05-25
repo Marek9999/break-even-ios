@@ -1,6 +1,7 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { requireIdentity } from "./lib/auth";
 
 // Standard exchange rates snapshot for seed data (rates relative to USD)
 const SEED_EXCHANGE_RATES = {
@@ -27,6 +28,7 @@ export const seedForCurrentUser = mutation({
     clerkId: v.string(),
   },
   handler: async (ctx, { clerkId }) => {
+    await requireIdentity(ctx, clerkId);
     const now = Date.now();
 
     // Find the current user
@@ -734,7 +736,7 @@ export const seedForCurrentUser = mutation({
  * Seed the database with sample data for development/testing.
  * Run with: npx convex run seed:seedDatabase
  */
-export const seedDatabase = mutation({
+export const seedDatabase = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
@@ -1189,7 +1191,7 @@ async function clearUserLinkedTables(ctx: any) {
  * Inspect the current reset state for dev troubleshooting.
  * Run with: npx convex run seed:getResettableDataCounts
  */
-export const getResettableDataCounts = query({
+export const getResettableDataCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
     const counts = await collectResetCounts(ctx);
@@ -1224,7 +1226,7 @@ export const getResettableDataCounts = query({
  * Clear all user-linked data while preserving Clerk-backed Convex users.
  * Run with: npx convex run seed:clearUserLinkedData '{"confirmText":"DELETE_USER_LINKED_DATA"}'
  */
-export const clearUserLinkedData = mutation({
+export const clearUserLinkedData = internalMutation({
   args: {
     confirmText: v.string(),
   },
@@ -1265,7 +1267,7 @@ export const clearUserLinkedData = mutation({
  * Run with: npx convex run seed:clearDatabase
  * WARNING: This will delete ALL data!
  */
-export const clearDatabase = mutation({
+export const clearDatabase = internalMutation({
   args: {
     confirmDelete: v.boolean(),
   },
@@ -1300,6 +1302,7 @@ export const clearUserData = mutation({
     clerkId: v.string(),
   },
   handler: async (ctx, { clerkId }) => {
+    await requireIdentity(ctx, clerkId);
     // Find the current user
     const currentUser = await ctx.db
       .query("users")

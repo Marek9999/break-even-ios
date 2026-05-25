@@ -66,6 +66,7 @@ struct OnboardingFlowView: View {
     @State private var aboutYouProfileHue: Double = 0.571
     @State private var aboutYouIsEditingEmoji: Bool = false
     @State private var aboutYouImageDominantColor: Color?
+    @State private var aboutYouDidChooseCustomProfileImage = false
     @State private var aboutYouName: String = ""
     @State private var aboutYouUsername: String = ""
     @State private var aboutYouNameTouched: Bool = false
@@ -191,6 +192,7 @@ struct OnboardingFlowView: View {
                 profileHue: $aboutYouProfileHue,
                 isEditingEmoji: $aboutYouIsEditingEmoji,
                 imageDominantColor: $aboutYouImageDominantColor,
+                didChooseCustomProfileImage: $aboutYouDidChooseCustomProfileImage,
                 name: $aboutYouName,
                 username: $aboutYouUsername,
                 nameTouched: $aboutYouNameTouched,
@@ -438,6 +440,10 @@ struct OnboardingFlowView: View {
         defer { isCompletingOnboarding = false }
 
         do {
+            if aboutYouDidChooseCustomProfileImage {
+                try await uploadSelectedProfileImage()
+            }
+
             let _: CompletionResponse = try await convexService.client.mutation(
                 "users:completeOnboarding",
                 with: [
@@ -453,6 +459,14 @@ struct OnboardingFlowView: View {
         } catch {
             completionErrorMessage = error.localizedDescription
         }
+    }
+
+    private func uploadSelectedProfileImage() async throws {
+        guard let image = aboutYouProfileImage,
+              let imageData = image.jpegData(compressionQuality: 0.8) else { return }
+
+        let _ = try await clerk.user?.setProfileImage(imageData: imageData)
+        try await convexService.syncUser(clerk: clerk)
     }
 
     private func onboardingBackButton(progress: CGFloat) -> some View {

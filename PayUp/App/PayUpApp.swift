@@ -89,12 +89,20 @@ struct PayUpApp: App {
                 sessionCoordinator.completeBootstrap(signedIn: false)
             }
         } catch {
-            sessionCoordinator.failBootstrap(message: error.localizedDescription)
+            await resetLocalSessionAfterBootstrapFailure()
 
             #if DEBUG
             print("❌ Failed to bootstrap Clerk session: \(error)")
             #endif
         }
+    }
+
+    @MainActor
+    private func resetLocalSessionAfterBootstrapFailure() async {
+        try? await clerk.signOut()
+        notificationManager.handleSignedOutLocally()
+        await convexService.signOut()
+        sessionCoordinator.completeBootstrap(signedIn: false)
     }
 
     @MainActor
