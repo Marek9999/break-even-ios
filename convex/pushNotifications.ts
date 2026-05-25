@@ -4,7 +4,7 @@ import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { createPrivateKey, sign as signPayload } from "node:crypto";
-import { connect } from "node:http2";
+import { connect, type IncomingHttpHeaders } from "node:http2";
 
 const pushResultValidator = v.object({
   sentCount: v.number(),
@@ -127,20 +127,20 @@ async function sendToAPNs(
     let body = "";
 
     request.setEncoding("utf8");
-    request.on("response", (headers) => {
+    request.on("response", (headers: IncomingHttpHeaders) => {
       const rawStatus = headers[":status"];
       if (typeof rawStatus === "number") {
         status = rawStatus;
       }
     });
-    request.on("data", (chunk) => {
+    request.on("data", (chunk: string) => {
       body += chunk;
     });
     request.on("end", () => {
       client.close();
       resolve({ status, body });
     });
-    request.on("error", (error) => {
+    request.on("error", (error: Error) => {
       client.close();
       reject(error);
     });
@@ -222,7 +222,7 @@ export const sendActivityPush = internalAction({
       const payload = {
         aps: {
           alert: {
-            title: "Break Even",
+            title: "PayUp",
             body: args.message,
           },
           sound: "default",

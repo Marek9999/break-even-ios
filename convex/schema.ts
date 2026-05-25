@@ -12,6 +12,8 @@ export default defineSchema({
     defaultCurrency: v.string(), // "USD", "EUR", etc.
     username: v.optional(v.string()),
     usernameChangedAt: v.optional(v.number()),
+    onboardingCompletedAt: v.optional(v.number()),
+    onboardingVersion: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_clerkId", ["clerkId"])

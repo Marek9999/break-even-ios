@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import {
   normalizeEmail,
@@ -34,6 +34,42 @@ async function propagateProfileToLinkedFriends(
   }
 }
 
+async function ensureSelfFriend(
+  ctx: any,
+  user: {
+    _id: Id<"users">;
+    name: string;
+    email: string;
+    phone?: string;
+    avatarUrl?: string;
+    createdAt?: number;
+  }
+) {
+  const existingSelfFriend = await ctx.db
+    .query("friends")
+    .withIndex("by_owner_isSelf", (q: any) =>
+      q.eq("ownerId", user._id).eq("isSelf", true)
+    )
+    .unique();
+
+  if (existingSelfFriend) {
+    return existingSelfFriend._id;
+  }
+
+  return await ctx.db.insert("friends", {
+    ownerId: user._id,
+    linkedUserId: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    avatarUrl: user.avatarUrl,
+    isDummy: false,
+    isSelf: true,
+    inviteStatus: "none",
+    createdAt: Date.now(),
+  });
+}
+
 /**
  * Get or create a user based on Clerk authentication
  * Called when a user signs in to sync their Clerk profile with Convex
@@ -54,6 +90,8 @@ export const getOrCreateUser = mutation({
       throw new Error("A valid email address is required");
     }
 
+    const resolvedAvatarUrl = args.avatarUrl === "" ? undefined : args.avatarUrl;
+
     // Check if user already exists
     const existingUser = await ctx.db
       .query("users")
@@ -61,9 +99,6 @@ export const getOrCreateUser = mutation({
       .unique();
 
     if (existingUser) {
-      // Treat empty string avatarUrl as removal
-      const resolvedAvatarUrl = args.avatarUrl === "" ? undefined : args.avatarUrl;
-
       // Update user info if changed
       await ctx.db.patch(existingUser._id, {
         email: normalizedEmail,
@@ -80,6 +115,16 @@ export const getOrCreateUser = mutation({
         avatarUrl: resolvedAvatarUrl,
       });
 
+      // Reset flows can intentionally remove all friend rows while preserving users.
+      // Recreate the required self-friend on the next successful sync if needed.
+      await ensureSelfFriend(ctx, {
+        _id: existingUser._id,
+        name: args.name,
+        email: normalizedEmail,
+        phone: args.phone,
+        avatarUrl: resolvedAvatarUrl,
+      });
+
       return existingUser._id;
     }
 
@@ -89,70 +134,23 @@ export const getOrCreateUser = mutation({
       email: normalizedEmail,
       name: args.name,
       phone: args.phone,
-      avatarUrl: args.avatarUrl,
+      avatarUrl: resolvedAvatarUrl,
       defaultCurrency: args.defaultCurrency || "USD",
       createdAt: Date.now(),
     });
 
     // Create a "self" friend entry for this user (represents "Me" in splits)
-    await ctx.db.insert("friends", {
-      ownerId: userId,
-      linkedUserId: userId,
+    await ensureSelfFriend(ctx, {
+      _id: userId,
       name: args.name,
       email: normalizedEmail,
       phone: args.phone,
-      avatarUrl: args.avatarUrl,
-      isDummy: false,
-      isSelf: true,
-      inviteStatus: "none",
-      createdAt: Date.now(),
+      avatarUrl: resolvedAvatarUrl,
     });
 
-    // Check for pending invitations for this email.
-    // Instead of auto-accepting, create friend rows with "invite_received"
-    // so the new user sees them in their invitations list.
-    const pendingInvitations = await ctx.db
-      .query("invitations")
-      .withIndex("by_recipient_email_status", (q) =>
-        q.eq("recipientEmail", normalizedEmail).eq("status", "pending")
-      )
-      .collect();
-
-    for (const invitation of pendingInvitations) {
-      const dummyFriend = await ctx.db.get(invitation.friendId);
-      if (dummyFriend) {
-        // Update the sender's friend row to point to the new user
-        await ctx.db.patch(dummyFriend._id, {
-          linkedUserId: userId,
-        });
-
-        // Create a reciprocal friend entry with invite_received status
-        const sender = await ctx.db.get(invitation.senderId);
-        if (sender) {
-          const existingFriend = await ctx.db
-            .query("friends")
-            .withIndex("by_owner_linkedUser", (q) =>
-              q.eq("ownerId", userId).eq("linkedUserId", sender._id)
-            )
-            .unique();
-
-          if (!existingFriend) {
-            await ctx.db.insert("friends", {
-              ownerId: userId,
-              linkedUserId: sender._id,
-              name: sender.name,
-              email: sender.email,
-              phone: sender.phone,
-              avatarUrl: sender.avatarUrl,
-              isDummy: false,
-              isSelf: false,
-              inviteStatus: "invite_received",
-              createdAt: Date.now(),
-            });
-          }
-        }
-      }
-    }
+    // Note: email-based pending-invite reconciliation has been removed.
+    // Linking is now an explicit user action — placeholders stay placeholders
+    // until the owner picks "Link to user" or merges via an incoming invite.
 
     return userId;
   },
@@ -328,12 +326,114 @@ export const setUsername = mutation({
 });
 
 /**
+ * Save required onboarding profile fields and mark onboarding complete.
+ * This is the authoritative per-user gate for entering the signed-in app.
+ */
+export const completeOnboarding = mutation({
+  args: {
+    clerkId: v.string(),
+    name: v.string(),
+    username: v.string(),
+    onboardingVersion: v.optional(v.number()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    username: v.string(),
+    onboardingCompletedAt: v.number(),
+    onboardingVersion: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+    const name = args.name.trim();
+    const username = args.username.toLowerCase().trim();
+    const onboardingVersion = args.onboardingVersion ?? 1;
+
+    if (name.length === 0) {
+      throw new Error("Name is required");
+    }
+
+    if (username.length < 3 || username.length > 20) {
+      throw new Error("Username must be between 3 and 20 characters");
+    }
+
+    if (!/^[a-z0-9_]+$/.test(username)) {
+      throw new Error(
+        "Username can only contain lowercase letters, numbers, and underscores"
+      );
+    }
+
+    if (
+      user.username &&
+      user.username !== username &&
+      user.usernameChangedAt
+    ) {
+      const hoursSinceLastChange =
+        (Date.now() - user.usernameChangedAt) / (1000 * 60 * 60);
+      if (hoursSinceLastChange < 48) {
+        const hoursRemaining = Math.ceil(48 - hoursSinceLastChange);
+        throw new Error(
+          `You can change your username again in ${hoursRemaining} hour${hoursRemaining === 1 ? "" : "s"}`
+        );
+      }
+    }
+
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_username", (q) => q.eq("username", username))
+      .unique();
+
+    if (existing && existing._id !== user._id) {
+      throw new Error("This username is already taken");
+    }
+
+    const now = Date.now();
+    const usernameChangedAt =
+      user.username === username && user.usernameChangedAt
+        ? user.usernameChangedAt
+        : now;
+
+    await ctx.db.patch(user._id, {
+      name,
+      username,
+      usernameChangedAt,
+      onboardingCompletedAt: now,
+      onboardingVersion,
+    });
+
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (selfFriend && selfFriend.name !== name) {
+      await ctx.db.patch(selfFriend._id, { name });
+    }
+
+    await propagateProfileToLinkedFriends(ctx, user._id, { name });
+
+    return {
+      success: true,
+      username,
+      onboardingCompletedAt: now,
+      onboardingVersion,
+    };
+  },
+});
+
+/**
  * Check if a username is available (real-time availability for the UI).
  */
 export const checkUsernameAvailable = query({
   args: {
     username: v.string(),
+    clerkId: v.optional(v.string()),
   },
+  returns: v.object({
+    available: v.boolean(),
+    reason: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, args) => {
     const username = args.username.toLowerCase().trim();
 
@@ -354,6 +454,13 @@ export const checkUsernameAvailable = query({
       .unique();
 
     if (existing) {
+      if (args.clerkId) {
+        const currentUser = await requireAuthenticatedUser(ctx, args.clerkId);
+        if (existing._id === currentUser._id) {
+          return { available: true, reason: null };
+        }
+      }
+
       return { available: false, reason: "Already taken" };
     }
 
@@ -392,7 +499,7 @@ export const getUserByUsername = query({
 /**
  * List all users (for development/debugging only)
  */
-export const listAllUsers = query({
+export const listAllUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("users").collect();

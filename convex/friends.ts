@@ -7,6 +7,11 @@ import {
   requireOwner,
 } from "./lib/auth";
 import { insertActivity } from "./activities";
+import {
+  backfillParticipants,
+  backfillSettlements,
+  createInvitationForFriend,
+} from "./invitations";
 
 /**
  * List all friends for the current user.
@@ -24,7 +29,23 @@ export const listFriends = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
       .collect();
 
-    return friends;
+    const linkedUsers = new Map<string, { username?: string }>();
+    for (const friend of friends) {
+      if (!friend.linkedUserId) continue;
+      const linkedUser = await ctx.db.get(friend.linkedUserId);
+      if (linkedUser) {
+        linkedUsers.set(friend.linkedUserId.toString(), {
+          username: linkedUser.username,
+        });
+      }
+    }
+
+    return friends.map((friend) => ({
+      ...friend,
+      username: friend.linkedUserId
+        ? linkedUsers.get(friend.linkedUserId.toString())?.username
+        : undefined,
+    }));
   },
 });
 
@@ -94,10 +115,16 @@ export const checkEmailOnApp = query({
 });
 
 /**
- * Create a friend entry. Does NOT auto-link or create reciprocal rows.
- * If the email matches an existing user, stores the linkedUserId reference
- * but keeps isDummy true until the invite is accepted.
- * Returns the friendId and whether the user exists on the app.
+ * Create a placeholder ("dummy") friend.
+ *
+ * Always creates a fresh placeholder row — no username/email auto-linking,
+ * no dedup. Duplicate placeholders are explicitly allowed (two friends named
+ * "Bob" can coexist; each can be linked independently later).
+ *
+ * `email`/`phone`/`linkedUsername` are kept as optional arguments for
+ * backwards compatibility with existing callers, but `linkedUsername` is
+ * ignored — the placeholder never silently becomes "almost linked". Use
+ * `linkPlaceholderToUser` (manual) or `mergePlaceholderIntoInvite` to link.
  */
 export const createDummyFriend = mutation({
   args: {
@@ -111,134 +138,320 @@ export const createDummyFriend = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireAuthenticatedUser(ctx, args.clerkId);
-    const normalizedEmail = normalizeEmail(args.email);
 
-    // Block self-invite by email
+    const trimmedName = args.name.trim();
+    if (!trimmedName) {
+      throw new Error("Name is required");
+    }
+
+    const normalizedEmail = normalizeEmail(args.email);
     if (normalizedEmail && normalizedEmail === normalizeEmail(user.email)) {
       throw new Error("Cannot add yourself as a friend");
     }
 
-    // Block self-invite by username
-    if (
-      args.linkedUsername &&
-      user.username &&
-      args.linkedUsername.toLowerCase() === user.username.toLowerCase()
-    ) {
-      throw new Error("Cannot add yourself as a friend");
-    }
-
-    // If a username was provided, resolve it to a user first
-    let resolvedUser: {
-      _id: Id<"users">;
-      name: string;
-      email: string;
-      phone?: string;
-      avatarUrl?: string;
-    } | null = null;
-
-    if (args.linkedUsername) {
-      const foundUser = await ctx.db
-        .query("users")
-        .withIndex("by_username", (q) =>
-          q.eq("username", args.linkedUsername!.toLowerCase().trim())
-        )
-        .unique();
-
-      if (!foundUser) {
-        // Username not found — fall through to create a dummy friend
-      } else {
-        // Check if we already have a friend row linked to this user
-        const existingByLinkedUser = await ctx.db
-          .query("friends")
-          .withIndex("by_owner_linkedUser", (q) =>
-            q.eq("ownerId", user._id).eq("linkedUserId", foundUser._id)
-          )
-          .unique();
-
-        if (existingByLinkedUser) {
-          if (
-            existingByLinkedUser.inviteStatus === "removed_by_me" ||
-            existingByLinkedUser.inviteStatus === "rejected"
-          ) {
-            await ctx.db.patch(existingByLinkedUser._id, {
-              inviteStatus: "invite_sent",
-            });
-          }
-          return {
-            friendId: existingByLinkedUser._id,
-            userExistsOnApp: true,
-            isExisting: true,
-          };
-        }
-
-        resolvedUser = foundUser;
-      }
-    }
-
-    // Check if a friend with this email already exists for this owner
-    if (normalizedEmail) {
-      const existingByEmail = await ctx.db
-        .query("friends")
-        .withIndex("by_owner_email", (q) =>
-          q.eq("ownerId", user._id).eq("email", normalizedEmail)
-        )
-        .unique();
-
-      if (existingByEmail) {
-        if (existingByEmail.inviteStatus === "removed_by_me" || existingByEmail.inviteStatus === "rejected") {
-          await ctx.db.patch(existingByEmail._id, { inviteStatus: "invite_sent" });
-        }
-        const existingAppUser = await ctx.db
-          .query("users")
-          .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
-          .unique();
-        return {
-          friendId: existingByEmail._id,
-          userExistsOnApp: !!existingAppUser,
-          isExisting: true,
-        };
-      }
-    }
-
-    // Determine linkedUserId from username resolution or email lookup
-    let linkedUserId: Id<"users"> | undefined = resolvedUser?._id;
-    let userExistsOnApp = !!resolvedUser;
-    let friendName = args.name;
-    let friendEmail = normalizedEmail;
-    let friendAvatarUrl: string | undefined = undefined;
-
-    if (resolvedUser) {
-      friendName = resolvedUser.name;
-      friendEmail = resolvedUser.email;
-      friendAvatarUrl = resolvedUser.avatarUrl;
-    } else if (normalizedEmail) {
-      const existingUser = await ctx.db
-        .query("users")
-        .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
-        .unique();
-
-      if (existingUser) {
-        linkedUserId = existingUser._id;
-        userExistsOnApp = true;
-      }
-    }
-
     const friendId = await ctx.db.insert("friends", {
       ownerId: user._id,
-      linkedUserId,
-      name: friendName,
-      email: friendEmail,
+      name: trimmedName,
+      email: normalizedEmail,
       phone: args.phone,
-      avatarUrl: friendAvatarUrl,
       avatarEmoji: args.avatarEmoji,
       avatarColor: args.avatarColor,
       isDummy: true,
       isSelf: false,
-      inviteStatus: linkedUserId ? "invite_sent" : "none",
+      inviteStatus: "none",
       createdAt: Date.now(),
     });
 
-    return { friendId, userExistsOnApp, isExisting: false };
+    return { friendId, userExistsOnApp: false, isExisting: false };
+  },
+});
+
+/**
+ * Backfill `transactionParticipants` for every transaction that references the
+ * given friend row (as payer or as a split target). Inserts a participant row
+ * for `userId` if one doesn't already exist. Used when a placeholder gets
+ * linked or merged into a real user, so the new linked user retroactively sees
+ * past splits in their feed/history queries.
+ */
+async function backfillTransactionParticipantsForFriend(
+  ctx: any,
+  friendId: Id<"friends">,
+  userId: Id<"users">
+) {
+  const txIds = new Set<string>();
+
+  const splits = await ctx.db
+    .query("splits")
+    .withIndex("by_friend", (q: any) => q.eq("friendId", friendId))
+    .collect();
+  for (const split of splits) {
+    txIds.add(split.transactionId.toString());
+  }
+
+  const paidTransactions = await ctx.db
+    .query("transactions")
+    .withIndex("by_paidBy", (q: any) => q.eq("paidById", friendId))
+    .collect();
+  for (const tx of paidTransactions) {
+    txIds.add(tx._id.toString());
+  }
+
+  for (const txIdStr of txIds) {
+    const txId = txIdStr as Id<"transactions">;
+    const existing = await ctx.db
+      .query("transactionParticipants")
+      .withIndex("by_user_transaction", (q: any) =>
+        q.eq("userId", userId).eq("transactionId", txId)
+      )
+      .unique();
+
+    if (!existing) {
+      await ctx.db.insert("transactionParticipants", {
+        transactionId: txId,
+        userId,
+        role: "participant",
+        addedAt: Date.now(),
+      });
+    }
+  }
+}
+
+/**
+ * Link an existing placeholder friend to a real user (Scenario A).
+ *
+ * The placeholder's `_id` is preserved (it's referenced by past
+ * `transactions.paidById`, `splits.friendId`, and `items.assignedToIds`),
+ * so all past splits keep working without any rewriting.
+ *
+ * After linking, the standard invitation flow runs (creates the invitation,
+ * the recipient-side reciprocal row, handles mutual auto-accept, etc.). On
+ * mutual auto-accept, past splits are backfilled into the new linked user's
+ * participant view.
+ *
+ * If the caller already has a different friend row linked to this user, the
+ * mutation returns `{ conflict: "already_linked", existingFriendId }` so the
+ * UI can offer to open the existing contact instead.
+ */
+export const linkPlaceholderToUser = mutation({
+  args: {
+    clerkId: v.string(),
+    friendId: v.id("friends"),
+    targetUserId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+
+    if (args.targetUserId === user._id) {
+      throw new Error("Cannot link to yourself");
+    }
+
+    const placeholder = await ctx.db.get(args.friendId);
+    if (!placeholder) {
+      throw new Error("Friend not found");
+    }
+    requireOwner(placeholder.ownerId, user._id);
+
+    if (placeholder.isSelf) {
+      throw new Error("Cannot link the self friend row");
+    }
+    if (!placeholder.isDummy || placeholder.linkedUserId) {
+      throw new Error("Friend is already linked to a user");
+    }
+
+    const targetUser = await ctx.db.get(args.targetUserId);
+    if (!targetUser) {
+      throw new Error("User not found");
+    }
+
+    // Soft conflict: another contact already linked to this user.
+    const existingLinked = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_linkedUser", (q) =>
+        q.eq("ownerId", user._id).eq("linkedUserId", args.targetUserId)
+      )
+      .unique();
+
+    if (existingLinked && existingLinked._id !== args.friendId) {
+      return {
+        conflict: "already_linked" as const,
+        existingFriendId: existingLinked._id,
+        friendId: args.friendId,
+        invitationId: undefined,
+        token: undefined,
+        autoAccepted: false,
+      };
+    }
+
+    // Promote the placeholder into a linked friend.
+    await ctx.db.patch(args.friendId, {
+      linkedUserId: args.targetUserId,
+      isDummy: false,
+      name: targetUser.name,
+      email: targetUser.email,
+      phone: targetUser.phone,
+      avatarUrl: targetUser.avatarUrl,
+    });
+
+    const result = await createInvitationForFriend(ctx, user, args.friendId, {});
+
+    if (result.autoAccepted) {
+      await backfillTransactionParticipantsForFriend(
+        ctx,
+        args.friendId,
+        args.targetUserId
+      );
+    }
+
+    return {
+      conflict: null,
+      friendId: args.friendId,
+      invitationId: result.invitationId,
+      token: result.token,
+      autoAccepted: result.autoAccepted,
+    };
+  },
+});
+
+/**
+ * Merge a placeholder into an incoming invite (Scenario B).
+ *
+ * Use case: I have a placeholder for Bob from before; Bob signs up and sends
+ * me an invite. From the received-invite UI I pick "Merge with existing
+ * contact", choose the placeholder, and the two collapse into one accepted
+ * friend row.
+ *
+ * The placeholder is the "winner" — its `_id` is preserved so past
+ * `transactions`/`splits`/`items.assignedToIds` keep referencing the same
+ * friend row. The incoming `invite_received` row is deleted, the sender's
+ * reciprocal row flips to "accepted", the invitation is marked accepted,
+ * and past splits are backfilled into the sender's participant view.
+ */
+export const mergePlaceholderIntoInvite = mutation({
+  args: {
+    clerkId: v.string(),
+    placeholderFriendId: v.id("friends"),
+    receivedFriendId: v.id("friends"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+
+    if (args.placeholderFriendId === args.receivedFriendId) {
+      throw new Error("Placeholder and received invite must be different rows");
+    }
+
+    const placeholder = await ctx.db.get(args.placeholderFriendId);
+    if (!placeholder) {
+      throw new Error("Placeholder friend not found");
+    }
+    requireOwner(placeholder.ownerId, user._id);
+
+    if (placeholder.isSelf) {
+      throw new Error("Cannot merge the self friend row");
+    }
+    if (!placeholder.isDummy || placeholder.linkedUserId) {
+      throw new Error("Selected contact is not a placeholder");
+    }
+
+    const received = await ctx.db.get(args.receivedFriendId);
+    if (!received) {
+      throw new Error("Received invite not found");
+    }
+    requireOwner(received.ownerId, user._id);
+
+    if (received.inviteStatus !== "invite_received" || !received.linkedUserId) {
+      throw new Error("Selected row is not a pending received invite");
+    }
+
+    const senderUserId = received.linkedUserId;
+    const senderUser = await ctx.db.get(senderUserId);
+    if (!senderUser) {
+      throw new Error("Sender user not found");
+    }
+
+    // Promote the placeholder, copying the sender's identity onto it.
+    await ctx.db.patch(args.placeholderFriendId, {
+      linkedUserId: senderUserId,
+      isDummy: false,
+      inviteStatus: "accepted",
+      name: senderUser.name,
+      email: senderUser.email,
+      phone: senderUser.phone,
+      avatarUrl: senderUser.avatarUrl,
+    });
+
+    // Update the sender's friend row pointing at me to "accepted" with my
+    // current profile, mirroring what acceptInvitationByFriend does.
+    const senderFriendRow = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_linkedUser", (q) =>
+        q.eq("ownerId", senderUserId).eq("linkedUserId", user._id)
+      )
+      .unique();
+
+    if (senderFriendRow) {
+      await ctx.db.patch(senderFriendRow._id, {
+        isDummy: false,
+        inviteStatus: "accepted",
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        avatarUrl: user.avatarUrl,
+      });
+
+      const invitation = await ctx.db
+        .query("invitations")
+        .withIndex("by_friend_status", (q) =>
+          q.eq("friendId", senderFriendRow._id).eq("status", "pending")
+        )
+        .first();
+
+      if (invitation) {
+        await ctx.db.patch(invitation._id, { status: "accepted" });
+      }
+
+      // Backfill participants and settlements on the sender's side so they see
+      // any splits I made while they were a placeholder for me (rare but
+      // possible if they had previously been linked, removed, and re-invited).
+      await backfillParticipants(ctx, senderFriendRow._id, user._id);
+      await backfillSettlements(
+        ctx,
+        senderFriendRow._id,
+        senderUserId,
+        args.placeholderFriendId,
+        user._id
+      );
+    }
+
+    // Backfill participants and settlements for the placeholder so the sender
+    // retroactively sees past splits I made with this placeholder.
+    await backfillTransactionParticipantsForFriend(
+      ctx,
+      args.placeholderFriendId,
+      senderUserId
+    );
+    if (senderFriendRow) {
+      await backfillSettlements(
+        ctx,
+        args.placeholderFriendId,
+        user._id,
+        senderFriendRow._id,
+        senderUserId
+      );
+    }
+
+    // Remove the duplicate received row — the placeholder now represents this person.
+    await ctx.db.delete(args.receivedFriendId);
+
+    await insertActivity(ctx, {
+      userId: senderUserId,
+      actorId: user._id,
+      actorName: user.name,
+      type: "invitation_accepted",
+      message: `${user.name} accepted your friend request`,
+      friendId: senderFriendRow?._id,
+    });
+
+    return { success: true, friendId: args.placeholderFriendId };
   },
 });
 

@@ -5,7 +5,7 @@ This app now includes APNs-based activity notifications, but Apple account and X
 ## 1. Apple Developer Setup
 
 1. Open [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list).
-2. Select the app identifier for `com.rudradsigns.break-even-ios`.
+2. Select the app identifier for `com.rudradsigns.payup`.
 3. Enable the `Push Notifications` capability for that App ID.
 4. Open the `Keys` section in Apple Developer.
 5. Create a new key with `Apple Push Notifications service (APNs)` enabled.
@@ -37,7 +37,7 @@ Set these values in your Convex environment:
 
 Recommended values:
 
-- `APNS_BUNDLE_ID=com.rudradsigns.break-even-ios`
+- `APNS_BUNDLE_ID=com.rudradsigns.payup`
 - `APNS_USE_SANDBOX=true` while testing debug builds on device
 
 For `APNS_PRIVATE_KEY`, paste the full `.p8` key contents including the begin/end lines. If your secret UI escapes newlines, that is okay; the backend normalizes `\\n` into real line breaks.

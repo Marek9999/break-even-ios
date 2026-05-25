@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 
 /**
  * One-time migration: backfill inviteStatus on all friends rows
@@ -6,7 +6,7 @@ import { mutation } from "./_generated/server";
  *
  * Run via Convex dashboard: mutations > migrations:backfillInviteSystemV1
  */
-export const backfillInviteSystemV1 = mutation({
+export const backfillInviteSystemV1 = internalMutation({
   args: {},
   handler: async (ctx) => {
     // --- Phase 1: Backfill inviteStatus on friends ---

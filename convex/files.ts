@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation } from "./_generated/server";
 
 /**
  * Generate a URL for uploading a receipt image
@@ -7,14 +7,20 @@ import { mutation, query } from "./_generated/server";
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
     return await ctx.storage.generateUploadUrl();
   },
 });
 
 /**
- * Get the URL for a stored file
+ * Get the URL for a stored file. Receipt URLs used by the app are returned
+ * through authenticated transaction-detail queries after access checks.
  */
-export const getFileUrl = query({
+export const getFileUrl = internalQuery({
   args: {
     storageId: v.id("_storage"),
   },
@@ -26,7 +32,7 @@ export const getFileUrl = query({
 /**
  * Delete a stored file
  */
-export const deleteFile = mutation({
+export const deleteFile = internalMutation({
   args: {
     storageId: v.id("_storage"),
   },
@@ -40,7 +46,7 @@ export const deleteFile = mutation({
  * Store a file reference and return its ID
  * This is called after uploading to the generated URL
  */
-export const saveFileReference = mutation({
+export const saveFileReference = internalMutation({
   args: {
     storageId: v.id("_storage"),
     transactionId: v.optional(v.id("transactions")),
