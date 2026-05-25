@@ -42,6 +42,9 @@ struct ProfileView: View {
     @State private var showEditUsername = false
     @State private var editedUsername = ""
     @State private var usernameError: String?
+    @State private var showAccountDeletionSheet = false
+    @State private var isDeletingAccount = false
+    @State private var accountDeletionError: String?
     #if DEBUG
     @State private var showOnboarding = false
     #endif
@@ -88,6 +91,9 @@ struct ProfileView: View {
     private var currentUser: ConvexUser? {
         sessionCoordinator.currentUser
     }
+
+    private let privacyPolicyURL = URL(string: "https://payupsplits.app/privacy")
+    private let termsOfServiceURL = URL(string: "https://payupsplits.app/terms")
     
     // MARK: - Body
     
@@ -172,6 +178,20 @@ struct ProfileView: View {
                 )
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showAccountDeletionSheet) {
+                AccountDeletionSheet(
+                    isDeleting: isDeletingAccount,
+                    errorMessage: accountDeletionError,
+                    onCancel: {
+                        guard !isDeletingAccount else { return }
+                        showAccountDeletionSheet = false
+                    },
+                    onConfirmDelete: performAccountDeletion
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCompactAdaptation(.sheet)
             }
             .photosPicker(
                 isPresented: $viewModel.showPhotoLibrary,
@@ -658,19 +678,56 @@ struct ProfileView: View {
     // MARK: - Sign Out Section
     
     private var signOutSection: some View {
-        Button {
-            viewModel.showSignOutConfirmation = true
-        } label: {
-            Text("Sign Out")
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundStyle(Color.appDestructive)
+        VStack(spacing: 14) {
+            Button {
+                viewModel.showSignOutConfirmation = true
+            } label: {
+                Text("Sign Out")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.appDestructive)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.appDestructive.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
+            }
+            .buttonStyle(.plain)
+
+            VStack(spacing: 10) {
+                legalLinkButton("Privacy Policy") {
+                    if let privacyPolicyURL {
+                        openURL(privacyPolicyURL)
+                    }
+                }
+
+                legalLinkButton("Terms of Service") {
+                    if let termsOfServiceURL {
+                        openURL(termsOfServiceURL)
+                    }
+                }
+
+                legalLinkButton("Delete Account", destructive: true) {
+                    accountDeletionError = nil
+                    showAccountDeletionSheet = true
+                }
+            }
+        }
+        .padding(.top, 20)
+    }
+
+    private func legalLinkButton(
+        _ title: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.footnote)
+                .fontWeight(.medium)
+                .foregroundStyle(destructive ? Color.appDestructive : Color.text.opacity(0.65))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.appDestructive.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.top, 20)
     }
     
     // MARK: - DEBUG Section
@@ -938,6 +995,44 @@ struct ProfileView: View {
             }
         }
     }
+
+    private func performAccountDeletion() {
+        guard let clerkId = clerk.user?.id, let clerkUser = clerk.user else {
+            accountDeletionError = "We could not find an active account to delete. Please sign in again and retry."
+            return
+        }
+
+        isDeletingAccount = true
+        accountDeletionError = nil
+
+        Task { @MainActor in
+            do {
+                await notificationManager.prepareForSignOut(clerkId: clerkId)
+
+                let _: DeleteAccountResponse = try await convexService.client.mutation(
+                    "users:deleteAccount",
+                    with: [
+                        "clerkId": clerkId,
+                        "confirmationText": "DELETE_MY_PAYUP_ACCOUNT"
+                    ]
+                )
+
+                let _ = try await clerkUser.delete()
+                await convexService.signOut()
+                sessionCoordinator.stopCurrentUserSubscription(clearData: true)
+
+                isDeletingAccount = false
+                showAccountDeletionSheet = false
+            } catch {
+                isDeletingAccount = false
+                accountDeletionError = "We couldn't delete your account. Please check your connection and try again."
+
+                #if DEBUG
+                print("Failed to delete account: \(error)")
+                #endif
+            }
+        }
+    }
     
     // MARK: - Developer Functions
     
@@ -1027,6 +1122,178 @@ struct ProfileView: View {
         }
     }
     #endif
+}
+
+private struct DeleteAccountResponse: Decodable {
+    let success: Bool
+}
+
+private struct AccountDeletionSheet: View {
+    let isDeleting: Bool
+    let errorMessage: String?
+    let onCancel: () -> Void
+    let onConfirmDelete: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer(minLength: 12)
+
+            Text("⚠️")
+                .font(.system(size: 72))
+                .accessibilityHidden(true)
+
+            VStack(spacing: 12) {
+                Text("Delete your PayUp account?")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+
+                Text("This action is not reversible. Your PayUp profile, friends, invitations, expense records, settlements, receipt images, activity history, and notification device records will be permanently deleted. Shared records that other people need to keep may show you as a deleted user.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(Color.appDestructive)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(spacing: 12) {
+                Button(action: onCancel) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Go Back")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .clipShape(Capsule())
+                    .glassEffect(.clear.tint(.white.opacity(isDeleting ? 0.45 : 0.9)).interactive(), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+
+                HoldToDeleteAccountButton(
+                    isDeleting: isDeleting,
+                    onConfirmDelete: onConfirmDelete
+                )
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 28)
+        .background(Color.black.ignoresSafeArea())
+    }
+}
+
+private struct HoldToDeleteAccountButton: View {
+    let isDeleting: Bool
+    let onConfirmDelete: () -> Void
+
+    @State private var isHolding = false
+    @State private var didCompleteHold = false
+    @State private var remainingSeconds = 5
+    @State private var holdTask: Task<Void, Never>?
+
+    private var countdownText: String {
+        if isDeleting {
+            return "Deleting your account..."
+        }
+
+        if isHolding {
+            return "Keep holding for \(remainingSeconds) second\(remainingSeconds == 1 ? "" : "s")"
+        }
+
+        return "Hold for 5 seconds to confirm"
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(countdownText)
+                .font(.footnote)
+                .fontWeight(.medium)
+                .foregroundStyle(isHolding ? Color.appDestructive : .secondary)
+                .monospacedDigit()
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color.appDestructive.opacity(isHolding ? 0.24 : 0.14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Color.appDestructive.opacity(isHolding ? 0.7 : 0.35), lineWidth: 1)
+                    }
+
+                HStack(spacing: 10) {
+                    if isDeleting {
+                        ProgressView()
+                            .tint(Color.appDestructive)
+                    } else {
+                        Image(systemName: isHolding ? "hand.raised.fill" : "trash.fill")
+                    }
+
+                    Text(isDeleting ? "Deleting Account" : "Hold to Delete Account")
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.appDestructive)
+            }
+            .frame(height: 54)
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in startHoldingIfNeeded() }
+                    .onEnded { _ in cancelHoldingIfNeeded() }
+            )
+            .allowsHitTesting(!isDeleting)
+        }
+        .onDisappear {
+            cancelHoldingIfNeeded()
+        }
+    }
+
+    private func startHoldingIfNeeded() {
+        guard !isDeleting, !isHolding else { return }
+
+        isHolding = true
+        didCompleteHold = false
+        remainingSeconds = 5
+
+        holdTask?.cancel()
+        holdTask = Task { @MainActor in
+            let deadline = Date().addingTimeInterval(5)
+
+            while !Task.isCancelled {
+                let remaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
+                remainingSeconds = remaining
+
+                if remaining <= 0 {
+                    didCompleteHold = true
+                    isHolding = false
+                    holdTask = nil
+                    onConfirmDelete()
+                    return
+                }
+
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+    }
+
+    private func cancelHoldingIfNeeded() {
+        guard !didCompleteHold else { return }
+
+        holdTask?.cancel()
+        holdTask = nil
+        isHolding = false
+        remainingSeconds = 5
+    }
 }
 
 // MARK: - Preview
