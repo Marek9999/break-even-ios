@@ -695,6 +695,7 @@ struct HomeView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .mask(topPanelBubbleFadeMask)
                     .zIndex(1)
                 
                 balanceInfo(
@@ -732,6 +733,23 @@ struct HomeView: View {
                 .opacity(isInlineModePresented ? 1 : 0)
         )
         .allowsHitTesting(!isInlineModePresented)
+    }
+
+    private var topPanelBubbleFadeMask: some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .black.opacity(0.55), location: 0.35),
+                    .init(color: .black, location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 32)
+
+            Color.black
+        }
     }
     
     // MARK: - History List

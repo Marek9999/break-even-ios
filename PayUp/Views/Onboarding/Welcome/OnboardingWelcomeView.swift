@@ -13,6 +13,7 @@ import SwiftUI
 struct OnboardingWelcomeView: View {
     var onAppleTap: () -> Void = {}
     var onGoogleTap: () -> Void = {}
+    var onEmailTap: () -> Void = {}
 
     @State private var bubbles = OnboardingWelcomeView.makeSampleBubbles()
     @State private var showText = false
@@ -141,6 +142,14 @@ struct OnboardingWelcomeView: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.glass)
+
+            Button(action: onEmailTap) {
+                Text("Sign in with email")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .padding(.top, 4)
+            }
+            .buttonStyle(.plain)
         }
     }
 
