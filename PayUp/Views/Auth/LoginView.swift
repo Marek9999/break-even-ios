@@ -7,13 +7,15 @@ struct LoginView: View {
 
     @State private var isGoogleLoading = false
     @State private var isAppleLoading = false
+    @State private var showingEmailSignIn = false
     @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
             OnboardingWelcomeView(
                 onAppleTap: { Task { await signInWithApple() } },
-                onGoogleTap: { Task { await signInWithGoogle() } }
+                onGoogleTap: { Task { await signInWithGoogle() } },
+                onEmailTap: { showingEmailSignIn = true }
             )
 
             if isAppleLoading || isGoogleLoading {
@@ -27,6 +29,11 @@ struct LoginView: View {
         .animation(.easeInOut(duration: 0.2), value: isAppleLoading)
         .animation(.easeInOut(duration: 0.2), value: isGoogleLoading)
         .animation(.easeInOut(duration: 0.2), value: errorMessage)
+        .sheet(isPresented: $showingEmailSignIn) {
+            EmailSignInSheet(errorMessage: $errorMessage)
+                .presentationDetents([.height(430), .medium])
+                .presentationDragIndicator(.hidden)
+        }
     }
 
     // MARK: - Overlays
