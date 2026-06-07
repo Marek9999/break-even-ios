@@ -206,7 +206,11 @@ final class ConvexService {
     // MARK: - Authentication
     
     /// Sync user with Convex after Clerk authentication
-    func syncUser(clerk: Clerk) async throws {
+    func syncUser(
+        clerk: Clerk,
+        avatarUrlOverride: String? = nil,
+        usesAvatarUrlOverride: Bool = false
+    ) async throws {
         guard let user = clerk.user else {
             throw ConvexServiceError.notAuthenticated
         }
@@ -225,7 +229,7 @@ final class ConvexService {
         }
         
         let phone = user.primaryPhoneNumber?.phoneNumber
-        let avatarUrl = user.imageUrl
+        let avatarUrl = usesAvatarUrlOverride ? (avatarUrlOverride ?? "") : user.imageUrl
         
         // Convex v.optional() accepts undefined (omitted) but NOT null
         var args: [String: String] = [

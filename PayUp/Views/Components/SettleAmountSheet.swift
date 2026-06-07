@@ -267,7 +267,7 @@ struct SettleView: View {
                 name: "Me",
                 avatarUrl: userAvatarUrl,
                 initials: userInitials,
-                isUser: isUserPaying
+                isUser: true
             )
             
             Spacer()
@@ -300,7 +300,7 @@ struct SettleView: View {
                 name: friend.name.components(separatedBy: " ").first ?? friend.name,
                 avatarUrl: friend.avatarUrl,
                 initials: friend.initials,
-                isUser: !isUserPaying,
+                isUser: false,
                 emoji: friend.avatarEmoji,
                 avatarColor: friend.avatarColor
             )

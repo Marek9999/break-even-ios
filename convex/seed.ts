@@ -1,5 +1,5 @@
 import { internalMutation, internalQuery, mutation } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireIdentity } from "./lib/auth";
 
@@ -18,6 +18,19 @@ const SEED_EXCHANGE_RATES = {
   fetchedAt: Date.now(),
 };
 
+const SEED_RECEIPT_FILE_IDS = {
+  sengyoSushi: "kg2d9hxktvtzs6zwfhjrc55m5x886zdj" as Id<"_storage">,
+  ihop: "kg20k6mnnnfc358gn67e2a87ad887dtb" as Id<"_storage">,
+  mcdonalds: "kg2d97kdkts8px6wc0d5j5r0tx886fhp" as Id<"_storage">,
+};
+
+const SEED_RECEIPT_FILE_ID_SET = new Set<string>(Object.values(SEED_RECEIPT_FILE_IDS));
+
+function isSeedReceiptFileId(storageId: Id<"_storage"> | string) {
+  return SEED_RECEIPT_FILE_ID_SET.has(storageId.toString());
+}
+
+
 /**
  * Seed sample data for the currently logged-in user.
  * This creates friends and transactions linked to YOUR account.
@@ -30,8 +43,8 @@ export const seedForCurrentUser = mutation({
   handler: async (ctx, { clerkId }) => {
     await requireIdentity(ctx, clerkId);
     const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
 
-    // Find the current user
     const currentUser = await ctx.db
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
@@ -41,7 +54,6 @@ export const seedForCurrentUser = mutation({
       throw new Error("User not found. Please log in first.");
     }
 
-    // Check if user already has friends (besides self)
     const existingFriends = await ctx.db
       .query("friends")
       .withIndex("by_owner", (q) => q.eq("ownerId", currentUser._id))
@@ -51,8 +63,7 @@ export const seedForCurrentUser = mutation({
       return { message: "You already have sample data. Delete friends first to re-seed." };
     }
 
-    // Find or create the "self" friend entry
-    let selfFriend = existingFriends.find((f) => f.isSelf);
+    let selfFriend = existingFriends.find((friend) => friend.isSelf);
     if (!selfFriend) {
       const selfId = await ctx.db.insert("friends", {
         ownerId: currentUser._id,
@@ -61,6 +72,8 @@ export const seedForCurrentUser = mutation({
         email: currentUser.email,
         phone: currentUser.phone,
         avatarUrl: currentUser.avatarUrl,
+        avatarEmoji: "🙂",
+        avatarColor: "#42A5F5",
         isDummy: false,
         isSelf: true,
         inviteStatus: "none",
@@ -69,664 +82,438 @@ export const seedForCurrentUser = mutation({
       selfFriend = (await ctx.db.get(selfId)) ?? undefined;
     }
 
-    // ============================================
-    // CREATE DUMMY FRIENDS
-    // ============================================
-    const bobId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Bob Smith",
-      email: "bob@example.com",
-      phone: "+1987654321",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bob",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
+    if (!selfFriend) {
+      throw new Error("Could not create your self contact.");
+    }
 
-    const charlieId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Charlie Brown",
-      email: "charlie@example.com",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Charlie",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
+    type SeedFriendKey = "maya" | "leo" | "nina" | "omar" | "sofia" | "priya";
+    type SeedFriendSpec = {
+      key: SeedFriendKey;
+      name: string;
+      email: string;
+      phone?: string;
+      emoji: string;
+      color: string;
+    };
 
-    const dianaId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Diana Ross",
-      email: "diana@example.com",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Diana",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
+    const friendSpecs: SeedFriendSpec[] = [
+      { key: "maya", name: "Maya Patel", email: "maya@example.com", phone: "+14165550112", emoji: "🐼", color: "#EC407A" },
+      { key: "leo", name: "Leo Chen", email: "leo@example.com", phone: "+14165550123", emoji: "🦊", color: "#42A5F5" },
+      { key: "nina", name: "Nina Park", email: "nina@example.com", emoji: "🐨", color: "#AB47BC" },
+      { key: "omar", name: "Omar Johnson", email: "omar@example.com", emoji: "🦁", color: "#66BB6A" },
+      { key: "sofia", name: "Sofia Reyes", email: "sofia@example.com", emoji: "🐧", color: "#FFA726" },
+      { key: "priya", name: "Priya Shah", email: "priya@example.com", emoji: "🐰", color: "#26A69A" },
+    ];
 
-    // Eve - Will be a FULLY SETTLED friend (all balances = 0)
-    const eveId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Eve Martinez",
-      email: "eve@example.com",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Eve",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
+    const friends = {} as Record<SeedFriendKey, Id<"friends">>;
+    for (const spec of friendSpecs) {
+      friends[spec.key] = await ctx.db.insert("friends", {
+        ownerId: currentUser._id,
+        name: spec.name,
+        email: spec.email,
+        phone: spec.phone,
+        avatarEmoji: spec.emoji,
+        avatarColor: spec.color,
+        isDummy: true,
+        isSelf: false,
+        inviteStatus: "invite_sent",
+        createdAt: now,
+      });
+    }
 
-    // Frank - Will have PARTIAL SETTLEMENTS
-    const frankId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Frank Wilson",
-      email: "frank@example.com",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Frank",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
+    type SeedItem = {
+      name: string;
+      quantity?: number;
+      unitPrice: number;
+      assignedToIds: Id<"friends">[];
+    };
 
-    // ============================================
-    // CREATE TRANSACTIONS (with exchange rates)
-    // ============================================
+    type SeedSplit = {
+      friendId: Id<"friends">;
+      amount: number;
+      percentage?: number;
+    };
 
-    // Transaction 1: Dinner in USD (YOU paid, others owe you)
-    const tx1Id = await ctx.db.insert("transactions", {
+    type SeedTransaction = {
+      title: string;
+      emoji: string;
+      description?: string;
+      totalAmount: number;
+      currency: string;
+      splitMethod: string;
+      paidById: Id<"friends">;
+      daysAgo: number;
+      receiptFileId?: Id<"_storage">;
+      items?: SeedItem[];
+      splits: SeedSplit[];
+    };
+
+    const splitFromItems = (items: SeedItem[]) => {
+      const totals = new Map<string, { friendId: Id<"friends">; amount: number }>();
+      for (const item of items) {
+        const quantity = item.quantity ?? 1;
+        const assignees = item.assignedToIds;
+        const share = (quantity * item.unitPrice) / assignees.length;
+        for (const friendId of assignees) {
+          const key = friendId.toString();
+          const current = totals.get(key) ?? { friendId, amount: 0 };
+          current.amount += share;
+          totals.set(key, current);
+        }
+      }
+
+      return Array.from(totals.values()).map((split) => ({
+        friendId: split.friendId,
+        amount: Number(split.amount.toFixed(2)),
+      }));
+    };
+
+    const insertTransaction = async (tx: SeedTransaction) => {
+      const timestamp = now - tx.daysAgo * day;
+      const transactionId = await ctx.db.insert("transactions", {
+        createdById: currentUser._id,
+        paidById: tx.paidById,
+        title: tx.title,
+        emoji: tx.emoji,
+        description: tx.description,
+        totalAmount: tx.totalAmount,
+        currency: tx.currency,
+        splitMethod: tx.splitMethod,
+        receiptFileId: tx.receiptFileId,
+        items: tx.items?.map((item, index) => ({
+          id: `seed-${tx.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${index + 1}`,
+          name: item.name,
+          quantity: item.quantity ?? 1,
+          unitPrice: item.unitPrice,
+          assignedToIds: item.assignedToIds,
+        })),
+        exchangeRates: SEED_EXCHANGE_RATES,
+        date: timestamp,
+        createdAt: timestamp,
+      });
+
+      for (const split of tx.splits) {
+        await ctx.db.insert("splits", {
+          transactionId,
+          friendId: split.friendId,
+          amount: split.amount,
+          percentage: split.percentage,
+          createdAt: timestamp,
+        });
+      }
+
+      return transactionId;
+    };
+
+    const insertSeedActivity = async (args: {
+      actorName: string;
+      type: string;
+      message: string;
+      daysAgo: number;
+      transactionId?: Id<"transactions">;
+      friendId?: Id<"friends">;
+      settlementId?: Id<"settlements">;
+      isRead?: boolean;
+    }) => {
+      await ctx.db.insert("activities", {
+        userId: currentUser._id,
+        actorId: currentUser._id,
+        actorName: args.actorName,
+        type: args.type,
+        message: args.message,
+        transactionId: args.transactionId,
+        friendId: args.friendId,
+        settlementId: args.settlementId,
+        metadata: args.transactionId
+          ? JSON.stringify({ seeded: true, transactionId: args.transactionId })
+          : JSON.stringify({ seeded: true }),
+        isRead: args.isRead ?? false,
+        createdAt: now - args.daysAgo * day,
+      });
+    };
+
+    const everyone = [selfFriend._id, friends.maya, friends.leo, friends.nina];
+    const sushiItems: SeedItem[] = [
+      { name: "Maki A 18pcs", unitPrice: 16.95, assignedToIds: [selfFriend._id, friends.maya] },
+      { name: "Veggie Roll 18pcs", unitPrice: 15.95, assignedToIds: [friends.leo, friends.nina] },
+      { name: "Deep Fried Porkchop Curry", unitPrice: 14.95, assignedToIds: [selfFriend._id] },
+      { name: "Takoyaki 5pcs", unitPrice: 7.45, assignedToIds: [friends.maya, friends.leo] },
+      { name: "Torched 8", unitPrice: 18.45, assignedToIds: [selfFriend._id, friends.nina] },
+      { name: "Veggie Gyoza 6pcs", unitPrice: 7.45, assignedToIds: [friends.leo, friends.nina] },
+      { name: "Veggie Tempura Curry", unitPrice: 12.95, assignedToIds: [friends.maya] },
+      { name: "Sweet Yam 6pcs", unitPrice: 5.45, assignedToIds: everyone },
+      { name: "Assorted Tempura 7pcs", unitPrice: 13.45, assignedToIds: everyone },
+      { name: "HST", unitPrice: 14.69, assignedToIds: everyone },
+      { name: "Tip", unitPrice: 19.16, assignedToIds: everyone },
+    ];
+
+    const ihopCrew = [selfFriend._id, friends.omar, friends.sofia, friends.nina];
+    const ihopItems: SeedItem[] = [
+      { name: "Jalapeño Kick Burger", quantity: 2, unitPrice: 24.99, assignedToIds: [selfFriend._id, friends.omar] },
+      { name: "Cali Melt", unitPrice: 25.99, assignedToIds: [friends.sofia] },
+      { name: "Pancake Combo", unitPrice: 27.99, assignedToIds: [selfFriend._id] },
+      { name: "Spinach Mushroom Omelette", unitPrice: 29.99, assignedToIds: [friends.nina] },
+      { name: "Mexican Tres Leches", unitPrice: 21.99, assignedToIds: ihopCrew },
+      { name: "Poblano Benedict", unitPrice: 28.99, assignedToIds: [friends.omar] },
+      { name: "Vanilla Cold Brew", unitPrice: 6.99, assignedToIds: [selfFriend._id] },
+      { name: "Hot Cocoa", unitPrice: 4.99, assignedToIds: [friends.sofia] },
+      { name: "18% Gratuity", unitPrice: 35.44, assignedToIds: ihopCrew },
+      { name: "HST", unitPrice: 32.77, assignedToIds: ihopCrew },
+      { name: "Service Fee", unitPrice: 19.69, assignedToIds: ihopCrew },
+    ];
+
+    const mcdonaldsItems: SeedItem[] = [
+      { name: "Big Mac", unitPrice: 7.49, assignedToIds: [friends.leo] },
+      { name: "Salted Caramel Iced Coffee", unitPrice: 2.69, assignedToIds: [selfFriend._id] },
+      { name: "HST", unitPrice: 1.32, assignedToIds: [selfFriend._id, friends.leo] },
+    ];
+
+    const transactions: SeedTransaction[] = [
+      {
+        title: "Sengyo Sushi",
+        emoji: "🍣",
+        description: "Receipt scan with item-by-item assignments",
+        totalAmount: 146.90,
+        currency: "CAD",
+        splitMethod: "byItem",
+        paidById: selfFriend._id,
+        daysAgo: 1,
+        receiptFileId: SEED_RECEIPT_FILE_IDS.sengyoSushi,
+        items: sushiItems,
+        splits: splitFromItems(sushiItems),
+      },
+      {
+        title: "IHOP Brunch",
+        emoji: "🥞",
+        description: "Big brunch with shared fees and gratuity",
+        totalAmount: 284.81,
+        currency: "CAD",
+        splitMethod: "byItem",
+        paidById: friends.omar,
+        daysAgo: 3,
+        receiptFileId: SEED_RECEIPT_FILE_IDS.ihop,
+        items: ihopItems,
+        splits: splitFromItems(ihopItems),
+      },
+      {
+        title: "Late Night McDonald’s",
+        emoji: "🍔",
+        description: "Tiny receipt, still itemized",
+        totalAmount: 11.50,
+        currency: "CAD",
+        splitMethod: "byItem",
+        paidById: friends.leo,
+        daysAgo: 5,
+        receiptFileId: SEED_RECEIPT_FILE_IDS.mcdonalds,
+        items: mcdonaldsItems,
+        splits: splitFromItems(mcdonaldsItems),
+      },
+      {
+        title: "Cabin Groceries",
+        emoji: "🛒",
+        description: "Unequal split for a weekend away",
+        totalAmount: 186.42,
+        currency: "USD",
+        splitMethod: "unequal",
+        paidById: selfFriend._id,
+        daysAgo: 7,
+        splits: [
+          { friendId: selfFriend._id, amount: 48.20 },
+          { friendId: friends.maya, amount: 36.10 },
+          { friendId: friends.leo, amount: 52.12 },
+          { friendId: friends.priya, amount: 50.00 },
+        ],
+      },
+      {
+        title: "Movie Tickets",
+        emoji: "🎬",
+        description: "Simple equal split",
+        totalAmount: 72.00,
+        currency: "USD",
+        splitMethod: "equal",
+        paidById: friends.omar,
+        daysAgo: 10,
+        splits: [
+          { friendId: selfFriend._id, amount: 24.00 },
+          { friendId: friends.omar, amount: 24.00 },
+          { friendId: friends.sofia, amount: 24.00 },
+        ],
+      },
+      {
+        title: "Rent Share",
+        emoji: "🏠",
+        description: "By-parts split for different room sizes",
+        totalAmount: 1800.00,
+        currency: "USD",
+        splitMethod: "byParts",
+        paidById: selfFriend._id,
+        daysAgo: 14,
+        splits: [
+          { friendId: selfFriend._id, amount: 900.00, percentage: 50.00 },
+          { friendId: friends.priya, amount: 600.00, percentage: 33.33 },
+          { friendId: friends.maya, amount: 300.00, percentage: 16.67 },
+        ],
+      },
+      {
+        title: "Studio Coffee Run",
+        emoji: "☕",
+        description: "Settled example for the activity timeline",
+        totalAmount: 28.50,
+        currency: "USD",
+        splitMethod: "equal",
+        paidById: friends.sofia,
+        daysAgo: 18,
+        splits: [
+          { friendId: selfFriend._id, amount: 9.50 },
+          { friendId: friends.sofia, amount: 9.50 },
+          { friendId: friends.nina, amount: 9.50 },
+        ],
+      },
+    ];
+
+    const transactionIds: Record<string, Id<"transactions">> = {};
+    for (const transaction of transactions) {
+      transactionIds[transaction.title] = await insertTransaction(transaction);
+    }
+
+    const mayaSettlementId = await ctx.db.insert("settlements", {
       createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Dinner at Italian Place",
-      emoji: "🍝",
-      description: "Team dinner celebration",
-      totalAmount: 120.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 2 * 24 * 60 * 60 * 1000,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for dinner (3 people, $40 each)
-    await ctx.db.insert("splits", {
-      transactionId: tx1Id,
-      friendId: selfFriend!._id,
-      amount: 40.00,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx1Id,
-      friendId: bobId,
-      amount: 40.00,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx1Id,
-      friendId: charlieId,
-      amount: 40.00,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 2: Groceries in EUR (Bob paid, YOU owe Bob) - Tests EUR conversion
-    const tx2Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: bobId,
-      title: "Weekly Groceries",
-      emoji: "🛒",
-      totalAmount: 78.00, // €78 EUR
-      currency: "EUR",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 5 * 24 * 60 * 60 * 1000,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for groceries (2 people, €39 each)
-    await ctx.db.insert("splits", {
-      transactionId: tx2Id,
-      friendId: selfFriend!._id,
-      amount: 39.00, // €39 EUR
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx2Id,
-      friendId: bobId,
-      amount: 39.00,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 3: Movie in GBP (Charlie paid, settled) - Tests GBP conversion
-    const tx3Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: charlieId,
-      title: "Movie Night",
-      emoji: "🎬",
-      description: "Avengers movie",
-      totalAmount: 36.00, // £36 GBP
-      currency: "GBP",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 10 * 24 * 60 * 60 * 1000,
-      createdAt: now - 10 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for movie (3 people, £12 each) - ALL SETTLED
-    await ctx.db.insert("splits", {
-      transactionId: tx3Id,
-      friendId: selfFriend!._id,
-      amount: 12.00, // £12 GBP
-      createdAt: now - 10 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx3Id,
-      friendId: bobId,
-      amount: 12.00,
-      createdAt: now - 10 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx3Id,
-      friendId: charlieId,
-      amount: 12.00,
-      createdAt: now - 10 * 24 * 60 * 60 * 1000,
-    });
-
-    // Settlement record for Movie Night - User paid Charlie back £12
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: charlieId,
-      amount: 12.00,
-      currency: "GBP",
-      direction: "to_friend",  // User paid Charlie
-      balanceBeforeSettlement: 12.00,  // User owed £12 before paying
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 8 * 24 * 60 * 60 * 1000,
-      createdAt: now - 8 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 4: Rent in USD (YOU paid)
-    const tx4Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Monthly Rent",
-      emoji: "🏠",
-      description: "Apartment rent",
-      totalAmount: 1500.00,
-      currency: "USD",
-      splitMethod: "byParts",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 1 * 24 * 60 * 60 * 1000,
-      createdAt: now - 1 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for rent
-    await ctx.db.insert("splits", {
-      transactionId: tx4Id,
-      friendId: selfFriend!._id,
-      amount: 750.00,
-      percentage: 50,
-      createdAt: now - 1 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx4Id,
-      friendId: dianaId,
-      amount: 750.00,
-      percentage: 50,
-      createdAt: now - 1 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 5: Sushi in JPY (YOU paid, Charlie owes) - Tests JPY conversion
-    const tx5Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Sushi Dinner",
-      emoji: "🍣",
-      description: "Japanese restaurant",
-      totalAmount: 8970.00, // ¥8970 JPY (~$60 USD)
-      currency: "JPY",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 3 * 24 * 60 * 60 * 1000,
-      createdAt: now - 3 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for sushi (2 people, ¥4485 each)
-    await ctx.db.insert("splits", {
-      transactionId: tx5Id,
-      friendId: selfFriend!._id,
-      amount: 4485.00,
-      createdAt: now - 3 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx5Id,
-      friendId: charlieId,
-      amount: 4485.00, // ~$30 USD
-      createdAt: now - 3 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 6: Coffee in INR (Diana paid, YOU owe) - Tests INR conversion
-    const tx6Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: dianaId,
-      title: "Coffee Run",
-      emoji: "☕",
-      description: "Coffee and snacks",
-      totalAmount: 830.00, // ₹830 INR (~$10 USD)
-      currency: "INR",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 4 * 24 * 60 * 60 * 1000,
-      createdAt: now - 4 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for coffee (2 people, ₹415 each)
-    await ctx.db.insert("splits", {
-      transactionId: tx6Id,
-      friendId: selfFriend!._id,
-      amount: 415.00, // ~$5 USD
-      createdAt: now - 4 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx6Id,
-      friendId: dianaId,
-      amount: 415.00,
-      createdAt: now - 4 * 24 * 60 * 60 * 1000,
-    });
-
-    // ============================================
-    // FULLY SETTLED FRIEND (Eve) - All transactions settled
-    // ============================================
-
-    // Transaction 7: Concert tickets with Eve (YOU paid, Eve settled)
-    const tx7Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Concert Tickets",
-      emoji: "🎵",
-      description: "Taylor Swift concert",
-      totalAmount: 300.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 30 * 24 * 60 * 60 * 1000,
-      createdAt: now - 30 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for concert (2 people, $150 each) - ALL SETTLED
-    await ctx.db.insert("splits", {
-      transactionId: tx7Id,
-      friendId: selfFriend!._id,
+      friendId: friends.maya,
       amount: 150.00,
-      createdAt: now - 30 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx7Id,
-      friendId: eveId,
-      amount: 150.00,
-      createdAt: now - 30 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 8: Brunch where Eve paid (YOU settled your share)
-    const tx8Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: eveId,
-      title: "Weekend Brunch",
-      emoji: "🥞",
-      description: "Brunch at the cafe",
-      totalAmount: 80.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 15 * 24 * 60 * 60 * 1000,
-      createdAt: now - 15 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for brunch - ALL SETTLED
-    await ctx.db.insert("splits", {
-      transactionId: tx8Id,
-      friendId: selfFriend!._id,
-      amount: 40.00,
-      createdAt: now - 15 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx8Id,
-      friendId: eveId,
-      amount: 40.00,
-      createdAt: now - 15 * 24 * 60 * 60 * 1000,
-    });
-
-    // Create settlement record for Eve (brunch settlement)
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: eveId,
-      amount: 40.00,
-      currency: "USD",
-      direction: "to_friend",  // User paid Eve
-      balanceBeforeSettlement: 40.00,  // User owed $40 for brunch
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 14 * 24 * 60 * 60 * 1000,
-      createdAt: now - 14 * 24 * 60 * 60 * 1000,
-    });
-
-    // Create settlement record for Eve (concert settlement)
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: eveId,
-      amount: 150.00,
-      currency: "USD",
-      direction: "from_friend",  // Eve paid user
-      balanceBeforeSettlement: 150.00,  // Eve owed $150 for concert
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 25 * 24 * 60 * 60 * 1000,
-      createdAt: now - 25 * 24 * 60 * 60 * 1000,
-    });
-
-    // ============================================
-    // PARTIAL SETTLEMENTS (Frank)
-    // ============================================
-
-    // Transaction 9: Big dinner with Frank (YOU paid, Frank PARTIALLY settled)
-    const tx9Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Birthday Dinner",
-      emoji: "🎂",
-      description: "Frank's birthday celebration",
-      totalAmount: 200.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 7 * 24 * 60 * 60 * 1000,
-      createdAt: now - 7 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for birthday dinner - Frank PARTIALLY settled ($60 of $100)
-    await ctx.db.insert("splits", {
-      transactionId: tx9Id,
-      friendId: selfFriend!._id,
-      amount: 100.00,
-      createdAt: now - 7 * 24 * 60 * 60 * 1000,
-    });
-    const frankSplit1Id = await ctx.db.insert("splits", {
-      transactionId: tx9Id,
-      friendId: frankId,
-      amount: 100.00,
-      createdAt: now - 7 * 24 * 60 * 60 * 1000,
-    });
-
-    // Settlement record for Frank's partial payment
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: frankId,
-      amount: 60.00,
-      currency: "USD",
-      direction: "from_friend",  // Frank paid user
-      note: "First partial payment",
-      balanceBeforeSettlement: 100.00,  // Frank owed $100 before this payment
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 5 * 24 * 60 * 60 * 1000,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 10: Trip expenses with Frank (Frank paid, YOU PARTIALLY settled)
-    const tx10Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: frankId,
-      title: "Road Trip Gas",
-      emoji: "⛽",
-      description: "Gas for road trip",
-      totalAmount: 80.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 6 * 24 * 60 * 60 * 1000,
-      createdAt: now - 6 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for gas - YOU PARTIALLY settled ($25 of $40)
-    const userSplitFrankId = await ctx.db.insert("splits", {
-      transactionId: tx10Id,
-      friendId: selfFriend!._id,
-      amount: 40.00,
-      createdAt: now - 6 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx10Id,
-      friendId: frankId,
-      amount: 40.00,
-      createdAt: now - 6 * 24 * 60 * 60 * 1000,
-    });
-
-    // Settlement record for user's partial payment to Frank
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: frankId,
-      amount: 25.00,
-      currency: "USD",
-      direction: "to_friend",  // User paid Frank
-      note: "Partial payment for gas",
-      balanceBeforeSettlement: 40.00,  // User owed $40 before this payment
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 4 * 24 * 60 * 60 * 1000,
-      createdAt: now - 4 * 24 * 60 * 60 * 1000,
-    });
-
-    // Transaction 11: Another dinner with Frank in EUR (Partial, multi-currency test)
-    const tx11Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Paris Dinner",
-      emoji: "🗼",
-      description: "Dinner while traveling",
-      totalAmount: 92.00, // €92 EUR
-      currency: "EUR",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 12 * 24 * 60 * 60 * 1000,
-      createdAt: now - 12 * 24 * 60 * 60 * 1000,
-    });
-
-    // Splits for Paris dinner - Frank PARTIALLY settled (€20 of €46)
-    await ctx.db.insert("splits", {
-      transactionId: tx11Id,
-      friendId: selfFriend!._id,
-      amount: 46.00,
-      createdAt: now - 12 * 24 * 60 * 60 * 1000,
-    });
-    const frankSplit2Id = await ctx.db.insert("splits", {
-      transactionId: tx11Id,
-      friendId: frankId,
-      amount: 46.00,
-      createdAt: now - 12 * 24 * 60 * 60 * 1000,
-    });
-
-    // Settlement record for Frank's partial payment (EUR)
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: frankId,
-      amount: 20.00,
-      currency: "EUR",
-      direction: "from_friend",
-      note: "Partial payment in EUR",
-      balanceBeforeSettlement: 46.00,  // Frank owed €46 before this payment
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 10 * 24 * 60 * 60 * 1000,
-      createdAt: now - 10 * 24 * 60 * 60 * 1000,
-    });
-
-    // ============================================
-    // SETTLE-ALL HISTORY (Grace) - Tests "Show Older" feature
-    // ============================================
-
-    // Grace - Has old transactions that were fully settled, then new transactions after
-    const graceId = await ctx.db.insert("friends", {
-      ownerId: currentUser._id,
-      name: "Grace Kim",
-      email: "grace@example.com",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=Grace",
-      isDummy: true,
-      isSelf: false,
-      inviteStatus: "invite_sent",
-      createdAt: now,
-    });
-
-    // OLD Transaction 12: Lunch from 60 days ago (YOU paid, Grace owed - NOW FULLY SETTLED)
-    const tx12Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Team Lunch",
-      emoji: "🥗",
-      description: "Old team lunch",
-      totalAmount: 60.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 60 * 24 * 60 * 60 * 1000,
-      createdAt: now - 60 * 24 * 60 * 60 * 1000,
-    });
-
-    await ctx.db.insert("splits", {
-      transactionId: tx12Id,
-      friendId: selfFriend!._id,
-      amount: 30.00,
-      createdAt: now - 60 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx12Id,
-      friendId: graceId,
-      amount: 30.00,
-      createdAt: now - 60 * 24 * 60 * 60 * 1000,
-    });
-
-    // OLD Transaction 13: Coffee from 55 days ago (Grace paid, YOU owed - NOW FULLY SETTLED)
-    const tx13Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: graceId,
-      title: "Coffee Run",
-      emoji: "☕",
-      description: "Morning coffee",
-      totalAmount: 20.00,
-      currency: "USD",
-      splitMethod: "equal",
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 55 * 24 * 60 * 60 * 1000,
-      createdAt: now - 55 * 24 * 60 * 60 * 1000,
-    });
-
-    await ctx.db.insert("splits", {
-      transactionId: tx13Id,
-      friendId: selfFriend!._id,
-      amount: 10.00,
-      createdAt: now - 55 * 24 * 60 * 60 * 1000,
-    });
-    await ctx.db.insert("splits", {
-      transactionId: tx13Id,
-      friendId: graceId,
-      amount: 10.00,
-      createdAt: now - 55 * 24 * 60 * 60 * 1000,
-    });
-
-    // SETTLE-ALL EVENT (45 days ago) - Cleared everything with Grace
-    // Net at that point: Grace owed $30, User owed $10 = Net $20 to user
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: graceId,
-      amount: 20.00,  // Net amount settled
-      currency: "USD",
-      direction: "from_friend",  // Grace paid user the net difference
-      note: "Settled all",
-      balanceBeforeSettlement: 20.00,  // Net balance was $20 (Grace owed)
-      exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 45 * 24 * 60 * 60 * 1000,
-      createdAt: now - 45 * 24 * 60 * 60 * 1000,
-    });
-
-    // NEW Transaction 14: Dinner 5 days ago (YOU paid, Grace owes - PARTIAL because Grace paid $20 of $50)
-    const tx14Id = await ctx.db.insert("transactions", {
-      createdById: currentUser._id,
-      paidById: selfFriend!._id,
-      title: "Sushi Night",
-      emoji: "🍣",
-      description: "New dinner after settle-all",
-      totalAmount: 100.00,
-      currency: "USD",
-      splitMethod: "equal",
-  // Partial because Grace paid $20 of $50
-      exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 5 * 24 * 60 * 60 * 1000,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-
-    await ctx.db.insert("splits", {
-      transactionId: tx14Id,
-      friendId: selfFriend!._id,
-      amount: 50.00,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-    const graceSplit1Id = await ctx.db.insert("splits", {
-      transactionId: tx14Id,
-      friendId: graceId,
-      amount: 50.00,
-      createdAt: now - 5 * 24 * 60 * 60 * 1000,
-    });
-
-    // Partial settlement from Grace (3 days ago)
-    await ctx.db.insert("settlements", {
-      createdById: currentUser._id,
-      friendId: graceId,
-      amount: 20.00,
       currency: "USD",
       direction: "from_friend",
-      note: "Partial payment for sushi",
-      balanceBeforeSettlement: 50.00,  // Grace owed $50 before this payment
+      note: "Partial rent + groceries payback",
+      balanceBeforeSettlement: 336.10,
       exchangeRates: SEED_EXCHANGE_RATES,
-      settledAt: now - 3 * 24 * 60 * 60 * 1000,
-      createdAt: now - 3 * 24 * 60 * 60 * 1000,
+      settledAt: now - 4 * day,
+      createdAt: now - 4 * day,
     });
 
-    // NEW Transaction 15: Movie 2 days ago (Grace paid, YOU owe - PENDING)
-    const tx15Id = await ctx.db.insert("transactions", {
+    const omarSettlementId = await ctx.db.insert("settlements", {
       createdById: currentUser._id,
-      paidById: graceId,
-      title: "Movie Night",
-      emoji: "🎬",
-      description: "New movie after settle-all",
-      totalAmount: 40.00,
+      friendId: friends.omar,
+      amount: 10.00,
       currency: "USD",
-      splitMethod: "equal",
+      direction: "to_friend",
+      note: "Partial movie payback",
+      balanceBeforeSettlement: 24.00,
       exchangeRates: SEED_EXCHANGE_RATES,
-      date: now - 2 * 24 * 60 * 60 * 1000,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
+      settledAt: now - 8 * day,
+      createdAt: now - 8 * day,
     });
 
-    await ctx.db.insert("splits", {
-      transactionId: tx15Id,
-      friendId: selfFriend!._id,
-      amount: 20.00,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
+    const sofiaSettlementId = await ctx.db.insert("settlements", {
+      createdById: currentUser._id,
+      friendId: friends.sofia,
+      amount: 9.50,
+      currency: "USD",
+      direction: "to_friend",
+      note: "Coffee settled",
+      balanceBeforeSettlement: 9.50,
+      exchangeRates: SEED_EXCHANGE_RATES,
+      settledAt: now - 16 * day,
+      createdAt: now - 16 * day,
     });
-    await ctx.db.insert("splits", {
-      transactionId: tx15Id,
-      friendId: graceId,
-      amount: 20.00,
-      createdAt: now - 2 * 24 * 60 * 60 * 1000,
+
+    await insertSeedActivity({
+      actorName: "Maya Patel",
+      type: "settlement_recorded",
+      message: "Maya paid you $150.00 toward Rent Share and Cabin Groceries",
+      friendId: friends.maya,
+      settlementId: mayaSettlementId,
+      daysAgo: 0.25,
+    });
+
+    await insertSeedActivity({
+      actorName: currentUser.name,
+      type: "split_created",
+      message: `${currentUser.name} created "Sengyo Sushi"`,
+      transactionId: transactionIds["Sengyo Sushi"],
+      daysAgo: 1,
+      isRead: true,
+    });
+
+    await insertSeedActivity({
+      actorName: "Omar Johnson",
+      type: "split_created",
+      message: "Omar added you to \"IHOP Brunch\"",
+      transactionId: transactionIds["IHOP Brunch"],
+      friendId: friends.omar,
+      daysAgo: 3,
+    });
+
+    await insertSeedActivity({
+      actorName: "Leo Chen",
+      type: "split_created",
+      message: "Leo added you to \"Late Night McDonald’s\"",
+      transactionId: transactionIds["Late Night McDonald’s"],
+      friendId: friends.leo,
+      daysAgo: 5,
+      isRead: true,
+    });
+
+    await insertSeedActivity({
+      actorName: currentUser.name,
+      type: "split_edited",
+      message: `${currentUser.name} updated item assignments for "Cabin Groceries"`,
+      transactionId: transactionIds["Cabin Groceries"],
+      daysAgo: 6,
+    });
+
+    await insertSeedActivity({
+      actorName: currentUser.name,
+      type: "settlement_recorded",
+      message: `${currentUser.name} paid Omar $10.00 for Movie Tickets`,
+      friendId: friends.omar,
+      settlementId: omarSettlementId,
+      daysAgo: 8,
+      isRead: true,
+    });
+
+    await insertSeedActivity({
+      actorName: "Priya Shah",
+      type: "invitation_accepted",
+      message: "Priya accepted your friend invite",
+      friendId: friends.priya,
+      daysAgo: 12,
+      isRead: true,
+    });
+
+    await insertSeedActivity({
+      actorName: currentUser.name,
+      type: "split_created",
+      message: `${currentUser.name} created "Rent Share"`,
+      transactionId: transactionIds["Rent Share"],
+      daysAgo: 14,
+      isRead: true,
+    });
+
+    await insertSeedActivity({
+      actorName: currentUser.name,
+      type: "settlement_recorded",
+      message: `${currentUser.name} settled Studio Coffee Run with Sofia`,
+      friendId: friends.sofia,
+      settlementId: sofiaSettlementId,
+      daysAgo: 16,
+      isRead: true,
     });
 
     return {
-      message: "Sample data created for your account!",
+      message: "Fresh sample data created for your account!",
       created: {
-        friends: 6, // Bob, Charlie, Diana, Eve, Frank, Grace
-        transactions: 15,
-        splits: 32,
-        settlements: 9,  // Added 1 for Charlie Movie Night
+        friends: friendSpecs.length,
+        transactions: transactions.length,
+        receiptBackedTransactions: 3,
+        splits: transactions.reduce((total, transaction) => total + transaction.splits.length, 0),
+        settlements: 3,
+        activities: 9,
       },
       summary: {
-        currencies: "USD, EUR, GBP, JPY, INR",
-        fullySettledFriend: "Eve Martinez - All balances settled (net $0)",
-        partialSettlements: "Frank Wilson - NET: owes $40 ($100-$60) + €26 ($46-€20) = ~$68.26; you owe $15 ($40-$25) = NET ~$53 Frank owes you",
-        settleAllHistory: "Grace Kim - After settle-all: owes $30 ($50-$20 settled), you owe $20 (movie) = NET $10 Grace owes you",
-        pendingBalances: "Bob: owes $40, you owe €39 = NET ~$2.40 you owe Bob | Charlie: owes $40 + ¥4485 (~$30), Movie Night £12 settled = NET ~$70 Charlie owes | Diana: owes $750, you owe ₹415 (~$5) = NET ~$745 Diana owes",
+        avatars: "Emoji + color sample friends for the updated avatar UI",
+        receipts: "Sengyo Sushi, IHOP Brunch, and Late Night McDonald’s use uploaded receipt images with by-item splits",
+        splitMethods: "Includes byItem, equal, unequal, and byParts transactions",
+        settlementStates: "Includes pending balances, partial settlement, and fully settled coffee history",
+        activityFeed: "Includes split, settlement, edit, and invitation activity rows with read/unread states",
       },
     };
   },
@@ -1154,8 +941,10 @@ async function clearUserLinkedTables(ctx: any) {
   for (const transaction of transactions) {
     if (transaction.receiptFileId) {
       try {
-        await ctx.storage.delete(transaction.receiptFileId);
-        receiptFilesDeleted++;
+        if (!isSeedReceiptFileId(transaction.receiptFileId)) {
+          await ctx.storage.delete(transaction.receiptFileId);
+          receiptFilesDeleted++;
+        }
       } catch {
         // Ignore missing storage blobs so document cleanup can still complete.
       }
@@ -1354,6 +1143,13 @@ export const clearUserData = mutation({
 
     // Delete all transactions created by this user
     for (const tx of transactions) {
+      if (tx.receiptFileId && !isSeedReceiptFileId(tx.receiptFileId)) {
+        try {
+          await ctx.storage.delete(tx.receiptFileId);
+        } catch {
+          // Ignore missing storage blobs so document cleanup can still complete.
+        }
+      }
       await ctx.db.delete(tx._id);
     }
 

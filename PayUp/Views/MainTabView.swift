@@ -13,6 +13,7 @@ struct MainTabView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
     @Environment(\.notificationManager) private var notificationManager
+    @Environment(\.sessionCoordinator) private var sessionCoordinator
     
     @State private var isProfileSheetPresented = false
     @State private var isProfileSheetDetailShowing = false
@@ -24,7 +25,7 @@ struct MainTabView: View {
     @State private var profileSheetNavigationRequest: ProfileExternalNavigationRequest?
     
     private var userAvatarUrl: String? {
-        clerk.user?.imageUrl
+        sessionCoordinator.currentUser?.avatarUrl ?? clerk.user?.imageUrl
     }
     
     private var userInitials: String {

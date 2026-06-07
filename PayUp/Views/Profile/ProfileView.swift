@@ -22,6 +22,23 @@ private enum ProfileDestination: Hashable {
     #endif
 }
 
+private enum ProfileImageUpdateError: LocalizedError {
+    case invalidImageUploadURL
+    case uploadFailed
+    case invalidUploadResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImageUploadURL:
+            return "Could not create a valid profile image upload URL."
+        case .uploadFailed:
+            return "Profile image upload failed."
+        case .invalidUploadResponse:
+            return "Profile image upload did not return a storage ID."
+        }
+    }
+}
+
 struct ProfileView: View {
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
@@ -261,8 +278,8 @@ struct ProfileView: View {
             .task(id: subscriptionKey) {
                 startSubscriptions()
             }
-            .task(id: clerk.user?.imageUrl) {
-                await viewModel.loadAvatarImage(from: clerk.user?.imageUrl)
+            .task(id: currentUser?.avatarUrl ?? clerk.user?.imageUrl) {
+                await viewModel.loadAvatarImage(from: currentUser?.avatarUrl ?? clerk.user?.imageUrl)
             }
         }
     }
@@ -951,32 +968,88 @@ struct ProfileView: View {
     
     private func uploadProfileImage(_ image: UIImage) async {
         guard let imageData = image.jpegData(compressionQuality: 0.8) else { return }
+        guard let clerkId = clerk.user?.id else { return }
         viewModel.isUpdatingPhoto = true
+        viewModel.error = nil
+        defer { viewModel.isUpdatingPhoto = false }
+
         do {
-            let _ = try await clerk.user?.setProfileImage(imageData: imageData)
-            try await convexService.syncUser(clerk: clerk)
-            await viewModel.loadAvatarImage(from: clerk.user?.imageUrl)
+            viewModel.cachedAvatarImage = image
+            if let color = image.dominantColor() {
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    viewModel.dominantColor = color
+                }
+            }
+
+            let storageId = try await uploadProfileImageToConvex(imageData: imageData)
+            let avatarUrl: String = try await convexService.client.mutation(
+                "users:setProfileImageFromStorage",
+                with: [
+                    "clerkId": clerkId,
+                    "storageId": storageId
+                ]
+            )
+            convexService.subscriptionRestartToken += 1
+
+            await viewModel.loadAvatarImage(from: avatarUrl)
         } catch {
+            viewModel.error = error.localizedDescription
             #if DEBUG
             print("Failed to upload profile image: \(error)")
             #endif
         }
-        viewModel.isUpdatingPhoto = false
     }
     
     private func removeProfileImage() async {
+        guard let clerkId = clerk.user?.id else { return }
         viewModel.isUpdatingPhoto = true
+        viewModel.error = nil
+        defer { viewModel.isUpdatingPhoto = false }
+
         do {
-            let _ = try await clerk.user?.deleteProfileImage()
-            try await convexService.syncUser(clerk: clerk)
+            let _: Bool = try await convexService.client.mutation(
+                "users:clearProfileImage",
+                with: ["clerkId": clerkId]
+            )
+            convexService.subscriptionRestartToken += 1
+
             viewModel.cachedAvatarImage = nil
             withAnimation { viewModel.dominantColor = nil }
         } catch {
+            viewModel.error = error.localizedDescription
             #if DEBUG
             print("Failed to remove profile image: \(error)")
             #endif
         }
-        viewModel.isUpdatingPhoto = false
+    }
+
+    private func uploadProfileImageToConvex(imageData: Data) async throws -> String {
+        let uploadUrl: String = try await convexService.client.mutation(
+            "files:generateUploadUrl",
+            with: [String: String]()
+        )
+
+        guard let url = URL(string: uploadUrl) else {
+            throw ProfileImageUpdateError.invalidImageUploadURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.httpBody = imageData
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw ProfileImageUpdateError.uploadFailed
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let storageId = json["storageId"] as? String else {
+            throw ProfileImageUpdateError.invalidUploadResponse
+        }
+
+        return storageId
     }
     
     // MARK: - Sign Out

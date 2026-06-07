@@ -68,6 +68,7 @@ struct PersonDetailSheet: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.clerk) private var clerk
     @Environment(\.convexService) private var convexService
+    @Environment(\.sessionCoordinator) private var sessionCoordinator
     
     let friend: ConvexFriend
     let balance: BalanceSummary
@@ -334,7 +335,7 @@ struct PersonDetailSheet: View {
                 SettleView(
                     friend: friend,
                     userName: currentUserName,
-                    userAvatarUrl: clerk.user?.imageUrl,
+                    userAvatarUrl: sessionCoordinator.currentUser?.avatarUrl ?? clerk.user?.imageUrl,
                     maxAmount: displayAmount,
                     currency: userCurrency,
                     isUserPaying: !owedToMe,

@@ -101,20 +101,20 @@ export const getOrCreateUser = mutation({
       .unique();
 
     if (existingUser) {
-      // Update user info if changed
+      // Update auth-owned profile fields. Avatar changes are handled by the
+      // explicit profile-image mutations below so session recovery can't
+      // overwrite an app-managed image with a stale Clerk URL.
       await ctx.db.patch(existingUser._id, {
         email: normalizedEmail,
         name: args.name,
         phone: args.phone,
-        avatarUrl: resolvedAvatarUrl,
       });
 
-      // Propagate profile changes to self-friend and all linked friend records
+      // Propagate non-avatar profile changes to self-friend and all linked friend records.
       await propagateProfileToLinkedFriends(ctx, existingUser._id, {
         name: args.name,
         email: normalizedEmail,
         phone: args.phone,
-        avatarUrl: resolvedAvatarUrl,
       });
 
       // Reset flows can intentionally remove all friend rows while preserving users.
@@ -124,7 +124,7 @@ export const getOrCreateUser = mutation({
         name: args.name,
         email: normalizedEmail,
         phone: args.phone,
-        avatarUrl: resolvedAvatarUrl,
+        avatarUrl: existingUser.avatarUrl,
       });
 
       return existingUser._id;
@@ -241,6 +241,99 @@ export const updateProfile = mutation({
     }
 
     return user._id;
+  },
+});
+
+/**
+ * Set the user's PayUp profile image from a Convex storage upload.
+ * This is the app-owned profile image source of truth; Clerk sync should not
+ * overwrite it during session recovery.
+ */
+export const setProfileImageFromStorage = mutation({
+  args: {
+    clerkId: v.string(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+    const avatarUrl = await ctx.storage.getUrl(args.storageId);
+    if (!avatarUrl) {
+      throw new Error("Could not create a URL for the uploaded profile image.");
+    }
+
+    const previousAvatarFileId = user.avatarFileId;
+
+    await ctx.db.patch(user._id, {
+      avatarUrl,
+      avatarFileId: args.storageId,
+    });
+
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (selfFriend) {
+      await ctx.db.patch(selfFriend._id, { avatarUrl });
+    }
+
+    await propagateProfileToLinkedFriends(ctx, user._id, { avatarUrl });
+
+    if (
+      previousAvatarFileId &&
+      previousAvatarFileId.toString() !== args.storageId.toString()
+    ) {
+      try {
+        await ctx.storage.delete(previousAvatarFileId);
+      } catch {
+        // Ignore missing blobs; the database has already moved to the new image.
+      }
+    }
+
+    return avatarUrl;
+  },
+});
+
+/**
+ * Clear the user's app-owned profile image and remove the old storage blob.
+ */
+export const clearProfileImage = mutation({
+  args: {
+    clerkId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireAuthenticatedUser(ctx, args.clerkId);
+    const previousAvatarFileId = user.avatarFileId;
+
+    await ctx.db.patch(user._id, {
+      avatarUrl: undefined,
+      avatarFileId: undefined,
+    });
+
+    const selfFriend = await ctx.db
+      .query("friends")
+      .withIndex("by_owner_isSelf", (q) =>
+        q.eq("ownerId", user._id).eq("isSelf", true)
+      )
+      .unique();
+
+    if (selfFriend) {
+      await ctx.db.patch(selfFriend._id, { avatarUrl: undefined });
+    }
+
+    await propagateProfileToLinkedFriends(ctx, user._id, { avatarUrl: undefined });
+
+    if (previousAvatarFileId) {
+      try {
+        await ctx.storage.delete(previousAvatarFileId);
+      } catch {
+        // Ignore missing blobs; the profile has already been cleared.
+      }
+    }
+
+    return true;
   },
 });
 
