@@ -9,6 +9,7 @@ export default defineSchema({
     name: v.string(),
     phone: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
+    avatarFileId: v.optional(v.id("_storage")),
     defaultCurrency: v.string(), // "USD", "EUR", etc.
     username: v.optional(v.string()),
     usernameChangedAt: v.optional(v.number()),

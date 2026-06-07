@@ -6,9 +6,5 @@
 	<string>$(CLERK_PUBLISHABLE_KEY)</string>
 	<key>ConvexHost</key>
 	<string>$(CONVEX_HOST)</string>
-	<key>UIUserInterfaceStyle</key>
-	<string>Dark</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 </dict>
 </plist>
