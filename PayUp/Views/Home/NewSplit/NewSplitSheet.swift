@@ -38,6 +38,9 @@ struct NewSplitSheet: View {
     @State private var isAmountFocused: Bool = false
     @State private var fixedElementsWidth: CGFloat = 0
     @State private var expandedItemIds: Set<UUID> = []
+    @State private var snarkRemark: String?
+    @State private var snarkInputKey: String?
+    @State private var snarkTask: Task<Void, Never>?
     
     private enum Field: Hashable {
         case title
@@ -176,7 +179,22 @@ struct NewSplitSheet: View {
             } message: {
                 Text("Are you sure you want to delete this split? This cannot be undone.")
             }
-            .onAppear { setupInitialData() }
+            .onAppear {
+                setupInitialData()
+                scheduleSnarkRemarkUpdate()
+            }
+            .onDisappear {
+                snarkTask?.cancel()
+            }
+            .onChange(of: viewModel.title) { _, _ in
+                scheduleSnarkRemarkUpdate()
+            }
+            .onChange(of: viewModel.totalAmount) { _, _ in
+                scheduleSnarkRemarkUpdate()
+            }
+            .onChange(of: viewModel.currency) { _, _ in
+                scheduleSnarkRemarkUpdate()
+            }
     }
     
     // MARK: - Main Content
@@ -188,6 +206,7 @@ struct NewSplitSheet: View {
                 paidByRow
                 splitMethodRow
                 amountRow
+                snarkBubbleRow
                 totalLockedHintRow
                 friendsSection
                 
@@ -440,6 +459,25 @@ struct NewSplitSheet: View {
             ? "Add items below to set the total."
             : "Total is calculated from the items below."
     }
+
+    @ViewBuilder
+    private var snarkBubbleRow: some View {
+        if let snarkRemark {
+            HStack {
+                Spacer(minLength: 42)
+                SnarkRemarkBubble(text: snarkRemark)
+                    .frame(maxWidth: 300, alignment: .trailing)
+                    .offset(y: -6)
+            }
+            .padding(.top, -4)
+            .padding(.bottom, -2)
+            .transition(.asymmetric(
+                insertion: .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity),
+                removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)
+            ))
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: snarkRemark)
+        }
+    }
     
     @ViewBuilder
     private var totalLockedHintRow: some View {
@@ -582,6 +620,46 @@ struct NewSplitSheet: View {
         if viewModel.totalAmount > 0 {
             amountText = String(format: "%.2f", viewModel.totalAmount)
         }
+        scheduleSnarkRemarkUpdate()
+    }
+
+    private func scheduleSnarkRemarkUpdate() {
+        snarkTask?.cancel()
+
+        let title = viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let amount = viewModel.totalAmount
+        let currencyCode = viewModel.currency
+
+        guard title.count >= 2, amount > 0 else {
+            snarkRemark = nil
+            snarkInputKey = nil
+            return
+        }
+
+        let inputKey = "\(currencyCode)|\(Int((amount * 100).rounded()))|\(title.lowercased())"
+        guard inputKey != snarkInputKey else { return }
+
+        snarkInputKey = inputKey
+        snarkTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(650))
+                let remark = await AISnarkRemarkGenerator.shared.remark(
+                    for: title,
+                    amount: amount,
+                    currencyCode: currencyCode
+                )
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    guard snarkInputKey == inputKey else { return }
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                        snarkRemark = remark.isEmpty ? nil : remark
+                    }
+                }
+            } catch {
+                // Cancellation is expected while the user is still typing.
+            }
+        }
     }
     
     // MARK: - Save
@@ -632,6 +710,43 @@ struct NewSplitSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct SnarkRemarkBubble: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.accent)
+                .frame(width: 22, height: 22)
+                .background(.accent.opacity(0.14), in: .circle)
+
+            Text(text)
+                .font(.footnote)
+                .fontWeight(.semibold)
+                .foregroundStyle(.text)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background {
+            Capsule(style: .continuous)
+                .fill(.background.secondary.opacity(0.58))
+        }
+        .overlay(alignment: .topTrailing) {
+            Circle()
+                .fill(.accent.opacity(0.45))
+                .frame(width: 7, height: 7)
+                .offset(x: -18, y: 9)
+        }
+        .glassEffect(.regular.tint(.accent.opacity(0.12)), in: .capsule)
+        .accessibilityLabel("Spending remark")
+        .accessibilityValue(text)
     }
 }
 
