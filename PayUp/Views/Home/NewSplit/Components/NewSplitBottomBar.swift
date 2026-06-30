@@ -13,6 +13,7 @@ struct NewSplitBottomBar: View {
     let isValid: Bool
     let isLoading: Bool
     let hasReceiptImage: Bool
+    let snarkRemark: String?
     let onSave: () -> Void
     let onDelete: () -> Void
     let onScanReceipt: () -> Void
@@ -55,8 +56,10 @@ struct NewSplitBottomBar: View {
 
             Spacer()
 
-            HStack(spacing: 20) {
+            HStack(spacing: 12) {
                 scanReceiptCircleButton
+
+                snarkBubble
 
                 Button(action: onSave) {
                     Group {
@@ -81,8 +84,10 @@ struct NewSplitBottomBar: View {
     // MARK: - Create Mode
 
     private var createModeBar: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 12) {
             scanReceiptCircleButton
+
+            snarkBubble
 
             Button(action: onSave) {
                 Group {
@@ -99,6 +104,19 @@ struct NewSplitBottomBar: View {
             }
             .buttonStyle(.glassProminent)
             .disabled(!isValid || isLoading)
+        }
+    }
+
+    @ViewBuilder
+    private var snarkBubble: some View {
+        if let snarkRemark {
+            SnarkRemarkBubble(text: snarkRemark)
+                .frame(maxWidth: 150, alignment: .trailing)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.92, anchor: .trailing).combined(with: .opacity),
+                    removal: .scale(scale: 0.96, anchor: .trailing).combined(with: .opacity)
+                ))
+                .animation(.spring(response: 0.38, dampingFraction: 0.82), value: snarkRemark)
         }
     }
 

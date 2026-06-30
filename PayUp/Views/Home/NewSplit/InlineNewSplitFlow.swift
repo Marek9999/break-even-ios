@@ -27,6 +27,9 @@ struct InlineNewSplitFlow: View {
     @State private var showReceiptOverlay = false
     @State private var showReplaceReceiptAlert = false
     @State private var showAddPersonSheet = false
+    @State private var snarkRemark: String?
+    @State private var snarkInputKey: String?
+    @State private var snarkTask: Task<Void, Never>?
     @FocusState private var focusedField: Field?
     
     private enum Step: Int, Comparable {
@@ -164,6 +167,7 @@ struct InlineNewSplitFlow: View {
             if amountText.isEmpty, viewModel.totalAmount > 0 {
                 amountText = String(format: "%.2f", viewModel.totalAmount)
             }
+            scheduleSnarkRemarkUpdate()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 switch step {
                 case .amount:
@@ -176,6 +180,18 @@ struct InlineNewSplitFlow: View {
                     focusedField = nil
                 }
             }
+        }
+        .onDisappear {
+            snarkTask?.cancel()
+        }
+        .onChange(of: viewModel.title) { _, _ in
+            scheduleSnarkRemarkUpdate()
+        }
+        .onChange(of: viewModel.totalAmount) { _, _ in
+            scheduleSnarkRemarkUpdate()
+        }
+        .onChange(of: viewModel.currency) { _, _ in
+            scheduleSnarkRemarkUpdate()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             applyKeyboardChange(notification: notification, isHiding: false)
@@ -195,6 +211,25 @@ struct InlineNewSplitFlow: View {
     }
     
     private var confirmBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if let snarkRemark {
+                SnarkRemarkBubble(text: snarkRemark)
+                    .frame(maxWidth: 235, alignment: .trailing)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.92, anchor: .trailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.96, anchor: .trailing).combined(with: .opacity)
+                    ))
+            }
+
+            confirmButton
+        }
+        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: snarkRemark)
+        .padding(.trailing, 30)
+        .padding(.bottom, 8)
+        .zIndex(10)
+    }
+
+    private var confirmButton: some View {
         Button {
             guard canConfirmCurrentStep else { return }
             confirmCurrentStep()
@@ -211,9 +246,6 @@ struct InlineNewSplitFlow: View {
             in: .circle
         )
         .allowsHitTesting(canConfirmCurrentStep)
-        .padding(.trailing, 30)
-        .padding(.bottom, 8)
-        .zIndex(10)
     }
     
     private var confirmButtonSymbol: String {
@@ -1152,6 +1184,45 @@ struct InlineNewSplitFlow: View {
             }
         }
         focusedField = .friendSearch
+    }
+
+    private func scheduleSnarkRemarkUpdate() {
+        snarkTask?.cancel()
+
+        let title = viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let amount = viewModel.totalAmount
+        let currencyCode = viewModel.currency
+
+        guard title.count >= 2, amount > 0 else {
+            snarkRemark = nil
+            snarkInputKey = nil
+            return
+        }
+
+        let inputKey = "\(currencyCode)|\(Int((amount * 100).rounded()))|\(title.lowercased())"
+        guard inputKey != snarkInputKey else { return }
+
+        snarkInputKey = inputKey
+        snarkTask = Task {
+            do {
+                try await Task.sleep(for: .milliseconds(650))
+                let remark = await AISnarkRemarkGenerator.shared.remark(
+                    for: title,
+                    amount: amount,
+                    currencyCode: currencyCode
+                )
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    guard snarkInputKey == inputKey else { return }
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                        snarkRemark = remark.isEmpty ? nil : remark
+                    }
+                }
+            } catch {
+                // Cancellation is expected while the user is still typing.
+            }
+        }
     }
     
     // MARK: - Keyboard Avoidance
