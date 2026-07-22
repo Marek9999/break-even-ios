@@ -55,6 +55,13 @@ final class SessionCoordinator {
         beginBootstrap()
     }
 
+    func markProvisioningFailed(message: String) {
+        currentUserErrorMessage = message
+        if currentUser == nil {
+            currentUserLoadState = .failed(message)
+        }
+    }
+
     func startCurrentUserSubscription(
         clerkId: String,
         restartToken: Int,
@@ -82,16 +89,25 @@ final class SessionCoordinator {
 
                 for try await user in subscription {
                     if Task.isCancelled { break }
-                    currentUser = user
-                    currentUserErrorMessage = nil
-                    currentUserLoadState = .loaded
+
+                    if let user {
+                        currentUser = user
+                        currentUserErrorMessage = nil
+                        currentUserLoadState = .loaded
+                    } else {
+                        // Authenticated but not provisioned yet — keep loading so
+                        // recovery/sync can create the user instead of failing hard.
+                        currentUser = nil
+                        currentUserLoadState = .loading
+                    }
                 }
             } catch is CancellationError {
                 return
             } catch {
                 if Task.isCancelled { return }
-                currentUserErrorMessage = error.localizedDescription
-                currentUserLoadState = .failed(error.localizedDescription)
+                let message = SessionProvisioning.userFacingMessage(for: error)
+                currentUserErrorMessage = message
+                currentUserLoadState = .failed(message)
             }
         }
     }

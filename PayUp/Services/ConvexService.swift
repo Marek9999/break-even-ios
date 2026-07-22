@@ -218,7 +218,12 @@ final class ConvexService {
         try await ensureAuthenticatedClient()
         
         let clerkId = user.id
-        let email = user.primaryEmailAddress?.emailAddress ?? ""
+        // Prefer Clerk primary email; fall back to a stable placeholder so Apple
+        // Sign In without an email address can still provision a Convex user.
+        let email = SessionProvisioning.resolvedEmail(
+            clerkPrimaryEmail: user.primaryEmailAddress?.emailAddress,
+            clerkId: clerkId
+        )
         
         var name = "User"
         if let firstName = user.firstName {
@@ -253,7 +258,9 @@ final class ConvexService {
             
             currentUserId = userId
             isUserSynced = true
+            lastRecoveryError = nil
         } catch {
+            isUserSynced = false
             #if DEBUG
             print("📤 syncUser: Mutation failed with error: \(error)")
             #endif
@@ -278,7 +285,12 @@ final class ConvexService {
                 return true
             }
 
-            if !forceTokenRefresh, sessionState == .authenticated, lastRecoveryError == nil {
+            // Never skip provisioning: cold launch leaves isUserSynced false even
+            // when the Convex client still reports an authenticated JWT session.
+            if !forceTokenRefresh,
+               sessionState == .authenticated,
+               isUserSynced,
+               lastRecoveryError == nil {
                 return false
             }
 
@@ -312,7 +324,8 @@ final class ConvexService {
                 return restartSubscriptions
             } catch {
                 isConnected = false
-                lastRecoveryError = error.localizedDescription
+                isUserSynced = false
+                lastRecoveryError = SessionProvisioning.userFacingMessage(for: error)
 
                 #if DEBUG
                 print("❌ Convex recovery failed: \(error)")
@@ -398,5 +411,55 @@ enum ConvexServiceError: LocalizedError {
         case .mutationFailed(let message):
             return "Mutation failed: \(message)"
         }
+    }
+}
+
+/// Shared first-login / recovery helpers for Convex user provisioning.
+enum SessionProvisioning {
+    static let accountSetupFailedMessage =
+        "Couldn't finish setting up your account. Please try again."
+
+    /// Whether the current-user subscription is allowed to start.
+    static func shouldStartCurrentUserSubscription(
+        authPhase: SessionCoordinator.AuthPhase,
+        sessionState: ConvexSessionState,
+        isUserSynced: Bool
+    ) -> Bool {
+        authPhase == .signedIn && sessionState == .authenticated && isUserSynced
+    }
+
+    static func resolvedEmail(clerkPrimaryEmail: String?, clerkId: String) -> String {
+        if let email = clerkPrimaryEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !email.isEmpty {
+            return email
+        }
+        return placeholderEmail(for: clerkId)
+    }
+
+    static func placeholderEmail(for clerkId: String) -> String {
+        // Keep alphanumerics only for a valid local-part.
+        let local = clerkId.lowercased().filter { $0.isLetter || $0.isNumber }
+        return "user+\(local.isEmpty ? "unknown" : local)@accounts.payupsplits.app"
+    }
+
+    static func userFacingMessage(for error: Error) -> String {
+        let raw = error.localizedDescription
+        let lowered = raw.lowercased()
+        if lowered.contains("uniffi")
+            || lowered.contains("servererror")
+            || lowered.contains("user not found")
+            || lowered.contains("not authenticated")
+            || lowered.contains("could not connect")
+            || lowered.contains("websocket") {
+            return accountSetupFailedMessage
+        }
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return accountSetupFailedMessage
+        }
+        // Keep short, non-technical messages; rewrite anything that looks like a stack/client dump.
+        if raw.count > 120 || raw.contains("[Request ID:") || raw.contains("ClientError") {
+            return accountSetupFailedMessage
+        }
+        return raw
     }
 }

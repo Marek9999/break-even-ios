@@ -14,7 +14,7 @@ struct RootView: View {
     @Environment(\.sessionCoordinator) private var sessionCoordinator
 
     private var currentUserSubscriptionKey: String {
-        "\(clerk.user?.id ?? "signed-out"):\(convexService.sessionState):\(convexService.subscriptionRestartToken)"
+        "\(clerk.user?.id ?? "signed-out"):\(convexService.sessionState):\(convexService.isUserSynced):\(convexService.subscriptionRestartToken)"
     }
 
     private var needsOnboarding: Bool? {
@@ -32,6 +32,14 @@ struct RootView: View {
 
     private var shouldShowMainShell: Bool {
         sessionCoordinator.currentUserLoadState == .loaded && needsOnboarding == false
+    }
+
+    private var shouldShowProvisioningRecovery: Bool {
+        if case .failed = sessionCoordinator.currentUserLoadState {
+            return startupRecoveryMessage != nil
+        }
+        // Sync/provisioning failed before the subscription started.
+        return !convexService.isUserSynced && startupRecoveryMessage != nil
     }
     
     var body: some View {
@@ -51,9 +59,11 @@ struct RootView: View {
             }
         }
         .task(id: currentUserSubscriptionKey) {
-            guard sessionCoordinator.authPhase == .signedIn,
-                  let clerkId = clerk.user?.id,
-                  convexService.sessionState == .authenticated else {
+            guard SessionProvisioning.shouldStartCurrentUserSubscription(
+                authPhase: sessionCoordinator.authPhase,
+                sessionState: convexService.sessionState,
+                isUserSynced: convexService.isUserSynced
+            ), let clerkId = clerk.user?.id else {
                 return
             }
 
@@ -89,7 +99,7 @@ struct RootView: View {
     private var authenticatedContent: some View {
         if shouldShowMainShell {
             MainTabView()
-        } else if case .failed = sessionCoordinator.currentUserLoadState,
+        } else if shouldShowProvisioningRecovery,
                   let message = startupRecoveryMessage {
             authRecoveryView(message: message)
         } else {
@@ -111,14 +121,14 @@ struct RootView: View {
             try await convexService.recoverAuthenticatedSession(
                 clerk: clerk,
                 forceTokenRefresh: true,
-                restartSubscriptions: false
+                restartSubscriptions: true
             )
         }
     }
 
     private func authRecoveryView(message: String) -> some View {
         ContentUnavailableView(
-            "Reconnecting",
+            "Couldn't Finish Setup",
             systemImage: "arrow.triangle.2.circlepath",
             description: Text(message)
         )
@@ -126,11 +136,17 @@ struct RootView: View {
             ToolbarItem(placement: .bottomBar) {
                 Button("Try Again") {
                     Task {
-                        try? await convexService.recoverAuthenticatedSession(
-                            clerk: clerk,
-                            forceTokenRefresh: true,
-                            restartSubscriptions: false
-                        )
+                        do {
+                            try await convexService.recoverAuthenticatedSession(
+                                clerk: clerk,
+                                forceTokenRefresh: true,
+                                restartSubscriptions: true
+                            )
+                        } catch {
+                            sessionCoordinator.markProvisioningFailed(
+                                message: SessionProvisioning.userFacingMessage(for: error)
+                            )
+                        }
                     }
                 }
             }

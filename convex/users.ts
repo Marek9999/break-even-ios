@@ -2,7 +2,10 @@ import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import {
+  findAuthenticatedUser,
+  isPlaceholderEmail,
   normalizeEmail,
+  placeholderEmailForClerkId,
   requireAuthenticatedUser,
   requireIdentity,
 } from "./lib/auth";
@@ -87,10 +90,10 @@ export const getOrCreateUser = mutation({
   },
   handler: async (ctx, args) => {
     await requireIdentity(ctx, args.clerkId);
-    const normalizedEmail = normalizeEmail(args.email);
-    if (!normalizedEmail) {
-      throw new Error("A valid email address is required");
-    }
+    const providedEmail = normalizeEmail(args.email);
+    // Apple/Google first login can omit primary email; never block provisioning.
+    const provisionEmail =
+      providedEmail ?? placeholderEmailForClerkId(args.clerkId);
 
     const resolvedAvatarUrl = args.avatarUrl === "" ? undefined : args.avatarUrl;
 
@@ -101,11 +104,19 @@ export const getOrCreateUser = mutation({
       .unique();
 
     if (existingUser) {
+      // Prefer a real Clerk email when available; never overwrite a real email
+      // with a placeholder just because this sync omitted one.
+      const emailToStore =
+        providedEmail ??
+        (isPlaceholderEmail(existingUser.email)
+          ? provisionEmail
+          : existingUser.email);
+
       // Update auth-owned profile fields. Avatar changes are handled by the
       // explicit profile-image mutations below so session recovery can't
       // overwrite an app-managed image with a stale Clerk URL.
       await ctx.db.patch(existingUser._id, {
-        email: normalizedEmail,
+        email: emailToStore,
         name: args.name,
         phone: args.phone,
       });
@@ -113,7 +124,7 @@ export const getOrCreateUser = mutation({
       // Propagate non-avatar profile changes to self-friend and all linked friend records.
       await propagateProfileToLinkedFriends(ctx, existingUser._id, {
         name: args.name,
-        email: normalizedEmail,
+        email: emailToStore,
         phone: args.phone,
       });
 
@@ -122,7 +133,7 @@ export const getOrCreateUser = mutation({
       await ensureSelfFriend(ctx, {
         _id: existingUser._id,
         name: args.name,
-        email: normalizedEmail,
+        email: emailToStore,
         phone: args.phone,
         avatarUrl: existingUser.avatarUrl,
       });
@@ -133,7 +144,7 @@ export const getOrCreateUser = mutation({
     // Create new user
     const userId = await ctx.db.insert("users", {
       clerkId: args.clerkId,
-      email: normalizedEmail,
+      email: provisionEmail,
       name: args.name,
       phone: args.phone,
       avatarUrl: resolvedAvatarUrl,
@@ -145,7 +156,7 @@ export const getOrCreateUser = mutation({
     await ensureSelfFriend(ctx, {
       _id: userId,
       name: args.name,
-      email: normalizedEmail,
+      email: provisionEmail,
       phone: args.phone,
       avatarUrl: resolvedAvatarUrl,
     });
@@ -159,14 +170,15 @@ export const getOrCreateUser = mutation({
 });
 
 /**
- * Get current user by Clerk ID
+ * Get current user by Clerk ID.
+ * Returns null when authenticated but not yet provisioned (instead of throwing).
  */
 export const getCurrentUser = query({
   args: {
     clerkId: v.string(),
   },
   handler: async (ctx, args) => {
-    return await requireAuthenticatedUser(ctx, args.clerkId);
+    return await findAuthenticatedUser(ctx, args.clerkId);
   },
 });
 

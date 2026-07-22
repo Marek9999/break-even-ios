@@ -12,6 +12,79 @@ import Testing
 @MainActor
 struct PayUpTests {
 
+    @Test func currentUserSubscriptionWaitsForProvisioning() {
+        #expect(
+            !SessionProvisioning.shouldStartCurrentUserSubscription(
+                authPhase: .signedIn,
+                sessionState: .authenticated,
+                isUserSynced: false
+            )
+        )
+        #expect(
+            !SessionProvisioning.shouldStartCurrentUserSubscription(
+                authPhase: .signedIn,
+                sessionState: .loading,
+                isUserSynced: true
+            )
+        )
+        #expect(
+            !SessionProvisioning.shouldStartCurrentUserSubscription(
+                authPhase: .signedOut,
+                sessionState: .authenticated,
+                isUserSynced: true
+            )
+        )
+        #expect(
+            SessionProvisioning.shouldStartCurrentUserSubscription(
+                authPhase: .signedIn,
+                sessionState: .authenticated,
+                isUserSynced: true
+            )
+        )
+    }
+
+    @Test func placeholderEmailUsedWhenClerkEmailMissing() {
+        let fromMissing = SessionProvisioning.resolvedEmail(
+            clerkPrimaryEmail: nil,
+            clerkId: "user_ABC-123"
+        )
+        let fromBlank = SessionProvisioning.resolvedEmail(
+            clerkPrimaryEmail: "   ",
+            clerkId: "user_ABC-123"
+        )
+        let fromReal = SessionProvisioning.resolvedEmail(
+            clerkPrimaryEmail: "friend@example.com",
+            clerkId: "user_ABC-123"
+        )
+
+        #expect(fromMissing == "user+userabc123@accounts.payupsplits.app")
+        #expect(fromBlank == "user+userabc123@accounts.payupsplits.app")
+        #expect(fromReal == "friend@example.com")
+    }
+
+    @Test func recoveryErrorsHideTechnicalClientDumps() {
+        let uniffi = SessionProvisioning.userFacingMessage(
+            for: NSError(
+                domain: "Convex",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "UniFFI.ClientError.ServerError(msg: \"[Request ID: abc] Server Error\")"
+                ]
+            )
+        )
+        let userNotFound = SessionProvisioning.userFacingMessage(
+            for: NSError(
+                domain: "Convex",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "User not found"]
+            )
+        )
+
+        #expect(uniffi == SessionProvisioning.accountSetupFailedMessage)
+        #expect(userNotFound == SessionProvisioning.accountSetupFailedMessage)
+    }
+
     @Test func selectableFriendStatusesMatchSplitRules() async throws {
         let accepted = makeFriend(status: "accepted")
         let inviteSent = makeFriend(status: "invite_sent")
