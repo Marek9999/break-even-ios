@@ -52,7 +52,7 @@ struct PayUpApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(AppAppearanceMode.current.preferredColorScheme)
                 .environment(\.clerk, clerk)
                 .environment(\.convexService, convexService)
                 .environment(\.notificationManager, notificationManager)
@@ -145,6 +145,9 @@ struct PayUpApp: App {
                 await notificationManager.handleAuthenticatedSession(clerkId: clerkId)
             }
         } catch {
+            let message = SessionProvisioning.userFacingMessage(for: error)
+            sessionCoordinator.markProvisioningFailed(message: message)
+
             #if DEBUG
             print("❌ Failed to recover authenticated session (\(trigger)): \(error)")
             #endif
