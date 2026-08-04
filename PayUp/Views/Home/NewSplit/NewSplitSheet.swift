@@ -440,7 +440,7 @@ struct NewSplitSheet: View {
             ? "Add items below to set the total."
             : "Total is calculated from the items below."
     }
-
+    
     @ViewBuilder
     private var totalLockedHintRow: some View {
         if isTotalLocked {
