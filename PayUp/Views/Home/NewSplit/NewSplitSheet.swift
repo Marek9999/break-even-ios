@@ -134,7 +134,6 @@ struct NewSplitSheet: View {
                     isValid: viewModel.isValid,
                     isLoading: viewModel.isLoading,
                     hasReceiptImage: viewModel.scannedReceiptImage != nil,
-                    snarkRemark: snarkRemark,
                     onSave: { saveSplit() },
                     onDelete: { showDeleteSplitAlert = true },
                     onScanReceipt: { showReceiptCamera = true },
@@ -207,6 +206,7 @@ struct NewSplitSheet: View {
                 paidByRow
                 splitMethodRow
                 amountRow
+                snarkBubbleRow
                 totalLockedHintRow
                 friendsSection
                 
@@ -461,6 +461,25 @@ struct NewSplitSheet: View {
     }
 
     @ViewBuilder
+    private var snarkBubbleRow: some View {
+        if let snarkRemark {
+            HStack {
+                Spacer(minLength: 42)
+                SnarkRemarkBubble(text: snarkRemark)
+                    .frame(maxWidth: 300, alignment: .trailing)
+                    .offset(y: -6)
+            }
+            .padding(.top, -4)
+            .padding(.bottom, -2)
+            .transition(.asymmetric(
+                insertion: .scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity),
+                removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)
+            ))
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: snarkRemark)
+        }
+    }
+    
+    @ViewBuilder
     private var totalLockedHintRow: some View {
         if isTotalLocked {
             Text(totalLockedHint)
@@ -694,12 +713,10 @@ struct NewSplitSheet: View {
     }
 }
 
-struct SnarkRemarkBubble: View {
+private struct SnarkRemarkBubble: View {
     let text: String
 
     var body: some View {
-        let shape = SnarkRemarkBubbleShape()
-
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "sparkles")
                 .font(.system(size: 13, weight: .semibold))
@@ -715,11 +732,10 @@ struct SnarkRemarkBubble: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 21)
+        .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background {
-            shape
+            Capsule(style: .continuous)
                 .fill(.background.secondary.opacity(0.58))
         }
         .overlay(alignment: .topTrailing) {
@@ -728,31 +744,9 @@ struct SnarkRemarkBubble: View {
                 .frame(width: 7, height: 7)
                 .offset(x: -18, y: 9)
         }
-        .clipShape(shape)
-        .glassEffect(.regular.tint(.accent.opacity(0.12)), in: shape)
+        .glassEffect(.regular.tint(.accent.opacity(0.12)), in: .capsule)
         .accessibilityLabel("Spending remark")
         .accessibilityValue(text)
-    }
-}
-
-private struct SnarkRemarkBubbleShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let tailWidth: CGFloat = 11
-        let cornerRadius: CGFloat = min(20, rect.height / 2)
-        let bubbleRect = CGRect(
-            x: rect.minX,
-            y: rect.minY,
-            width: max(0, rect.width - tailWidth),
-            height: rect.height
-        )
-
-        var path = Path(roundedRect: bubbleRect, cornerRadius: cornerRadius)
-        let midY = bubbleRect.midY
-        path.move(to: CGPoint(x: bubbleRect.maxX - 1, y: midY - 8))
-        path.addLine(to: CGPoint(x: rect.maxX, y: midY))
-        path.addLine(to: CGPoint(x: bubbleRect.maxX - 1, y: midY + 8))
-        path.closeSubpath()
-        return path
     }
 }
 
